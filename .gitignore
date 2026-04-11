@@ -1,0 +1,7 @@
+/target
+*.log
+wtop.log
+.env
+*.pdb
+*.exp
+*.lib
