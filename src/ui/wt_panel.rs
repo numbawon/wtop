@@ -140,7 +140,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Paragraph::new(lines).block(block),
+        Paragraph::new(lines).block(block).style(theme.panel_bg),
         popup,
     );
 
@@ -202,7 +202,7 @@ fn render_nerd_font_confirm(frame: &mut Frame, parent: Rect, theme: &Theme) {
 
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Paragraph::new(confirm_lines).block(block),
+        Paragraph::new(confirm_lines).block(block).style(theme.panel_bg),
         popup,
     );
 }

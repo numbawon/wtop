@@ -14,8 +14,6 @@
 
 ![wtop main view](docs/screenshots/main.png)
 
-*<!-- screenshot: default dark theme, wide layout, processes running, Nerd Fonts enabled -->*
-
 </div>
 
 <br>
@@ -38,9 +36,7 @@ Another tool in the belt. When Task Manager is too noisy and Process Explorer is
 
 Hit <kbd>Enter</kbd> on any process to expand it and see its threads.
 
-![Thread expansion](docs/screenshots/thread_expand.png)
-
-*<!-- screenshot: a process expanded showing thread sub-rows — TID, wait reason labels, CPU time ms, start module -->*
+![Thread expansion](docs/screenshots/threads_expanded.png)
 
 Each thread shows what it's actually waiting on — `Sleep`, `Mutex`, `LpcReceive`, `Queue`, not just "Waiting". Start address resolves to a module name; anything that doesn't map to a loaded module gets flagged.
 
@@ -153,8 +149,6 @@ Logs go to `%TEMP%\wtop.log`.
 
 ![Filter and kill confirm](docs/screenshots/filter_kill.png)
 
-*<!-- screenshot: filter bar with text typed in, or the kill confirm dialog -->*
-
 <br>
 
 <h2>Themes</h2>
@@ -163,9 +157,7 @@ Logs go to `%TEMP%\wtop.log`.
 
 `dark` · `light` · `dracula` · `gruvbox` · `catppuccin` · `nord` · `tokyo_night`
 
-![Themes](docs/screenshots/themes.png)
-
-*<!-- screenshot: 2–3 themes side by side — Dracula and Gruvbox show the range well -->*
+![Themes](docs/screenshots/themes.gif)
 
 <br>
 
@@ -182,8 +174,6 @@ Cycle with <kbd>Shift</kbd><kbd>L</kbd>.
 
 ![Layouts](docs/screenshots/layouts.png)
 
-*<!-- screenshot: Wide vs Stacked, or two modes side by side -->*
-
 <br>
 
 <h2>Windows Terminal</h2>
@@ -191,8 +181,6 @@ Cycle with <kbd>Shift</kbd><kbd>L</kbd>.
 Press <kbd>w</kbd> to open the WT panel. If you haven't set a Nerd Font yet, wtop can write the setting — press <kbd>f</kbd>, confirm, restart WT.
 
 ![Windows Terminal panel](docs/screenshots/wt_panel.png)
-
-*<!-- screenshot: WT panel showing detected profile, current font, and the apply prompt -->*
 
 <br>
 

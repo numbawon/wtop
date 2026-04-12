@@ -135,7 +135,7 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
             Span::styled("  ✗ ", theme.gauge_high),
             Span::styled(msg.as_str(), theme.text_normal),
         ]);
-        frame.render_widget(Paragraph::new(line), area);
+        frame.render_widget(Paragraph::new(line).style(theme.panel_bg), area);
         return;
     }
 
@@ -166,7 +166,7 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
             Span::styled("  ", theme.text_dim),
             Span::styled(now.as_str(), theme.text_dim),
         ]);
-        let para = Paragraph::new(line);
+        let para = Paragraph::new(line).style(theme.panel_bg);
         frame.render_widget(para, area);
     }
 }

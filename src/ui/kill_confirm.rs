@@ -30,6 +30,7 @@ pub fn render(frame: &mut Frame, area: Rect, pid: u32, name: &str, theme: &Theme
 
     let para = Paragraph::new(body)
         .alignment(Alignment::Center)
+        .style(theme.panel_bg)
         .block(
             Block::default()
                 .borders(Borders::ALL)

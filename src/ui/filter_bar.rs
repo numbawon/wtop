@@ -20,6 +20,6 @@ pub fn render(frame: &mut Frame, area: Rect, filter_text: &str, active: bool, th
         Span::styled(cursor, style),
     ]);
 
-    let para = Paragraph::new(line);
+    let para = Paragraph::new(line).style(theme.panel_bg);
     frame.render_widget(para, area);
 }
