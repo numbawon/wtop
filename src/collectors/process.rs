@@ -1,8 +1,9 @@
+use bytesize::ByteSize;
 use crate::models::process::{ProcessEntry, ProcessStatus};
 use crate::models::thread::ThreadEntry;
 use sysinfo::{ProcessStatus as SysProcessStatus, System};
 use std::collections::HashMap;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::{
     GetTokenInformation, LookupAccountSidW, SID_NAME_USE,
@@ -21,7 +22,10 @@ pub struct ProcessCollector {
     sys: System,
     pub thread_request_rx: mpsc::Receiver<u32>,
     pub thread_result_tx: mpsc::Sender<(u32, Vec<ThreadEntry>)>,
-    user_cache: HashMap<u32, String>,
+    /// PID → interned username. Evicted when the process exits.
+    user_cache: HashMap<u32, Arc<str>>,
+    /// Unique username strings shared across all processes with the same owner.
+    user_intern: HashMap<String, Arc<str>>,
 }
 
 impl ProcessCollector {
@@ -31,7 +35,13 @@ impl ProcessCollector {
     ) -> Self {
         let mut sys = System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        Self { sys, thread_request_rx, thread_result_tx, user_cache: HashMap::new() }
+        Self {
+            sys,
+            thread_request_rx,
+            thread_result_tx,
+            user_cache: HashMap::new(),
+            user_intern: HashMap::new(),
+        }
     }
 
     pub fn collect(&mut self) -> Vec<ProcessEntry> {
@@ -40,6 +50,33 @@ impl ProcessCollector {
         let total_memory = self.sys.total_memory().max(1);
         let thread_counts = count_threads_by_pid();
 
+        // Resolve user arcs before building entries (can't borrow both cache maps
+        // inside a single closure that also holds &mut self).
+        let pid_users: HashMap<u32, Arc<str>> = self
+            .sys
+            .processes()
+            .keys()
+            .map(|pid_obj| {
+                let pid = pid_obj.as_u32();
+                let arc = if let Some(a) = self.user_cache.get(&pid) {
+                    a.clone()
+                } else {
+                    let raw = resolve_process_user(pid);
+                    let a = match self.user_intern.get(&raw) {
+                        Some(existing) => existing.clone(),
+                        None => {
+                            let a: Arc<str> = Arc::from(raw.as_str());
+                            self.user_intern.insert(raw, a.clone());
+                            a
+                        }
+                    };
+                    self.user_cache.insert(pid, a.clone());
+                    a
+                };
+                (pid, arc)
+            })
+            .collect();
+
         let entries: Vec<ProcessEntry> = self
             .sys
             .processes()
@@ -47,17 +84,30 @@ impl ProcessCollector {
             .map(|p| {
                 let pid = p.pid().as_u32();
                 let mem = p.memory();
+                let cpu_pct = p.cpu_usage();
+                let mem_pct_display = mem as f32 / total_memory as f32 * 100.0;
+                let thread_count = *thread_counts.get(&pid).unwrap_or(&0);
+                let disk_usage = p.disk_usage();
+                let disk_read = disk_usage.read_bytes;
+                let disk_write = disk_usage.written_bytes;
+                let user = pid_users.get(&pid).cloned().unwrap_or_else(|| Arc::from("?"));
                 ProcessEntry {
                     pid,
+                    pid_str: pid.to_string(),
                     name: p.name().to_string_lossy().into_owned(),
-                    cpu_pct: p.cpu_usage(),
+                    cpu_pct,
+                    cpu_pct_str: format!(" {:>5.1}%", cpu_pct),
                     mem_bytes: mem,
-                    mem_pct: mem as f32 / total_memory as f32 * 100.0,
-                    user: self.user_cache.entry(pid).or_insert_with(|| resolve_process_user(pid)).clone(),
+                    mem_str: ByteSize(mem).to_string(),
+                    mem_pct_str: format!("{:>4.1}%", mem_pct_display),
+                    user,
                     status: map_status(p.status()),
-                    thread_count: *thread_counts.get(&pid).unwrap_or(&0),
-                    disk_read_bps: p.disk_usage().read_bytes,
-                    disk_write_bps: p.disk_usage().written_bytes,
+                    thread_count,
+                    thread_count_str: thread_count.to_string(),
+                    disk_read_bps: disk_read,
+                    disk_write_bps: disk_write,
+                    disk_read_str: format!("{}/s", ByteSize(disk_read)),
+                    disk_write_str: format!("{}/s", ByteSize(disk_write)),
                     expanded: false,
                     threads: Vec::new(),
                 }

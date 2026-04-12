@@ -78,13 +78,13 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
 fn styles_for(kind: &RowKind, cursor: usize, theme: &Theme) -> (Style, Style, Style) {
     match kind {
-        RowKind::Header => (theme.header, theme.header, Style::default()),
-        RowKind::Hint | RowKind::Spacer => (theme.text_dim, theme.text_dim, Style::default()),
+        RowKind::Header => (theme.header, theme.header, theme.panel_bg),
+        RowKind::Hint | RowKind::Spacer => (theme.text_dim, theme.text_dim, theme.panel_bg),
         RowKind::Item(idx) => {
             if *idx == cursor {
                 (theme.row_selected, theme.row_selected, theme.row_selected)
             } else {
-                (theme.text_normal, theme.text_bright, Style::default())
+                (theme.text_normal, theme.text_bright, theme.panel_bg)
             }
         }
     }

@@ -18,6 +18,7 @@ use windows::Win32::Security::{
     SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
 };
 use windows::Win32::System::Threading::GetCurrentProcess;
+use chrono::Local;
 use crate::input::handler::{handle_key, AppAction};
 use crate::models::process::{sort_processes, SortState};
 use crate::wt::WtInfo;
@@ -62,9 +63,12 @@ pub struct AppState {
     pub sort_state: SortState,
     pub filter_active: bool,
     pub filter_text: String,
+    /// Lowercase cache of `filter_text` — updated on every keystroke, not per-process per-frame.
+    pub filter_text_lower: String,
     pub show_system_processes: bool,
     pub user_filter_active: bool,
-    pub current_user: String,
+    /// Lowercase username — computed once at startup for filter comparisons.
+    pub current_user_lower: String,
     pub show_help: bool,
     pub show_kill_confirm: bool,
     /// The (pid, name) of the process targeted for kill while the confirm dialog is open.
@@ -82,13 +86,17 @@ pub struct AppState {
     pub show_settings: bool,
     /// Cursor position within the settings panel (0-indexed over selectable items).
     pub settings_cursor: usize,
+    /// Cached HH:MM:SS timestamp string — refreshed once per second.
+    pub cached_time: String,
+    /// Unix-second at which `cached_time` was last formatted.
+    last_time_sec: i64,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
         let hub = CollectorHub::spawn(&config);
         let show_sys = config.show_system_processes;
-        let current_user = std::env::var("USERNAME").unwrap_or_default();
+        let current_user_lower = std::env::var("USERNAME").unwrap_or_default().to_lowercase();
         Self {
             config,
             hub,
@@ -97,9 +105,10 @@ impl AppState {
             sort_state: SortState::default(),
             filter_active: false,
             filter_text: String::new(),
+            filter_text_lower: String::new(),
             show_system_processes: show_sys,
             user_filter_active: false,
-            current_user,
+            current_user_lower,
             show_help: false,
             show_kill_confirm: false,
             kill_target: None,
@@ -109,6 +118,18 @@ impl AppState {
             wt_nerd_font_confirm: false,
             show_settings: false,
             settings_cursor: 0,
+            cached_time: Local::now().format("%H:%M:%S").to_string(),
+            last_time_sec: Local::now().timestamp(),
+        }
+    }
+
+    /// Refresh `cached_time` if the wall-clock second has advanced.
+    pub fn tick_time(&mut self) {
+        let now = Local::now();
+        let sec = now.timestamp();
+        if sec != self.last_time_sec {
+            self.cached_time = now.format("%H:%M:%S").to_string();
+            self.last_time_sec = sec;
         }
     }
 
@@ -173,8 +194,14 @@ impl AppState {
             AppAction::ToggleSortOrder => self.sort_state.ascending = !self.sort_state.ascending,
             AppAction::OpenFilter => self.filter_active = true,
             AppAction::CloseFilter => self.filter_active = false,
-            AppAction::FilterChar(c) => self.filter_text.push(c),
-            AppAction::FilterBackspace => { self.filter_text.pop(); }
+            AppAction::FilterChar(c) => {
+                self.filter_text.push(c);
+                self.filter_text_lower = self.filter_text.to_lowercase();
+            }
+            AppAction::FilterBackspace => {
+                self.filter_text.pop();
+                self.filter_text_lower = self.filter_text.to_lowercase();
+            }
             AppAction::KillProcess => {
                 // Capture the selected process before showing the dialog.
                 if let Ok(procs) = self.hub.processes.read() {
@@ -365,13 +392,13 @@ impl AppState {
             return false;
         }
         if self.user_filter_active
-            && !self.current_user.is_empty()
-            && !p.user.to_lowercase().contains(&self.current_user.to_lowercase())
+            && !self.current_user_lower.is_empty()
+            && !p.user.to_lowercase().contains(&self.current_user_lower as &str)
         {
             return false;
         }
-        if !self.filter_text.is_empty() {
-            return p.name.to_lowercase().contains(&self.filter_text.to_lowercase());
+        if !self.filter_text_lower.is_empty() {
+            return p.name.to_lowercase().contains(&self.filter_text_lower as &str);
         }
         true
     }
@@ -468,6 +495,17 @@ fn event_loop(
     std::thread::sleep(Duration::from_millis(300));
 
     loop {
+        state.tick_time();
+
+        // Check for dead collector threads (they only stop if they panicked).
+        let dead = state.hub.dead_collectors();
+        if !dead.is_empty() && state.status_message.is_none() {
+            state.status_message = Some(format!(
+                "Collector crashed: {} — data may be stale",
+                dead.join(", ")
+            ));
+        }
+
         // Drain any thread expansion results.
         state.drain_thread_results();
 

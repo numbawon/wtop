@@ -16,7 +16,7 @@ use crate::models::{
     thread::ThreadEntry,
 };
 use std::sync::{mpsc, Arc, RwLock};
-use std::thread::{spawn as spawn_thread, sleep as sleep_thread};
+use std::thread::{sleep as sleep_thread, Builder as ThreadBuilder, JoinHandle};
 use std::time::Duration;
 
 /// Shared state handles the UI thread reads from.
@@ -30,9 +30,22 @@ pub struct CollectorHub {
     pub thread_request_tx: mpsc::Sender<u32>,
     /// Receive (pid, threads) results here.
     pub thread_result_rx: mpsc::Receiver<(u32, Vec<ThreadEntry>)>,
+    /// Handles for the five background collector threads.
+    /// Used only to detect unexpected termination (panic).
+    collector_handles: Vec<(&'static str, JoinHandle<()>)>,
 }
 
 impl CollectorHub {
+    /// Returns the names of any collector threads that have stopped.
+    /// A stopped thread means it panicked, since every loop is infinite.
+    pub fn dead_collectors(&self) -> Vec<&'static str> {
+        self.collector_handles
+            .iter()
+            .filter(|(_, h)| h.is_finished())
+            .map(|(name, _)| *name)
+            .collect()
+    }
+
     /// Spawn all background collector threads and return the hub.
     pub fn spawn(config: &Config) -> Self {
         let cpu_state: Arc<RwLock<CpuSnapshot>> =
@@ -44,52 +57,61 @@ impl CollectorHub {
 
         let interval_ms = config.refresh_interval_ms;
         let history_len = config.cpu_history_len;
+        let mut handles: Vec<(&'static str, JoinHandle<()>)> = Vec::new();
 
         // CPU collector thread.
         {
             let state = Arc::clone(&cpu_state);
-            spawn_thread(move || {
-                let mut collector = cpu::CpuCollector::new(history_len);
-                loop {
-                    let snapshot = collector.collect();
-                    if let Ok(mut s) = state.write() {
-                        // Preserve per-core histories across snapshots.
-                        for (i, core) in snapshot.cores.iter().enumerate() {
-                            if let Some(existing) = s.cores.get_mut(i) {
-                                existing.usage_pct = core.usage_pct;
-                                existing.frequency_mhz = core.frequency_mhz;
-                                existing.history.push(core.usage_pct);
-                            } else {
-                                s.cores.push(core.clone());
-                                if let Some(c) = s.cores.last_mut() {
-                                    c.history.push(c.usage_pct);
+            let h = ThreadBuilder::new()
+                .name("wtop-cpu".into())
+                .spawn(move || {
+                    let mut collector = cpu::CpuCollector::new(history_len);
+                    loop {
+                        let snapshot = collector.collect();
+                        if let Ok(mut s) = state.write() {
+                            // Preserve per-core histories across snapshots.
+                            for (i, core) in snapshot.cores.iter().enumerate() {
+                                if let Some(existing) = s.cores.get_mut(i) {
+                                    existing.usage_pct = core.usage_pct;
+                                    existing.frequency_mhz = core.frequency_mhz;
+                                    existing.history.push(core.usage_pct);
+                                } else {
+                                    s.cores.push(core.clone());
+                                    if let Some(c) = s.cores.last_mut() {
+                                        c.history.push(c.usage_pct);
+                                    }
                                 }
                             }
+                            s.aggregate_pct = snapshot.aggregate_pct;
+                            s.aggregate_history.push(snapshot.aggregate_pct);
+                            s.logical_count = snapshot.logical_count;
+                            s.physical_count = snapshot.physical_count;
+                            s.brand = snapshot.brand;
                         }
-                        s.aggregate_pct = snapshot.aggregate_pct;
-                        s.aggregate_history.push(snapshot.aggregate_pct);
-                        s.logical_count = snapshot.logical_count;
-                        s.physical_count = snapshot.physical_count;
-                        s.brand = snapshot.brand;
+                        sleep_thread(Duration::from_millis(interval_ms));
                     }
-                    sleep_thread(Duration::from_millis(interval_ms));
-                }
-            });
+                })
+                .expect("failed to spawn cpu collector thread");
+            handles.push(("cpu", h));
         }
 
         // Memory collector thread.
         {
             let state = Arc::clone(&mem_state);
-            spawn_thread(move || {
-                let mut collector = memory::MemCollector::new();
-                loop {
-                    let snapshot = collector.collect();
-                    if let Ok(mut s) = state.write() {
-                        *s = snapshot;
+            let h = ThreadBuilder::new()
+                .name("wtop-memory".into())
+                .spawn(move || {
+                    let mut collector = memory::MemCollector::new();
+                    loop {
+                        let snapshot = collector.collect();
+                        if let Ok(mut s) = state.write() {
+                            *s = snapshot;
+                        }
+                        sleep_thread(Duration::from_millis(interval_ms));
                     }
-                    sleep_thread(Duration::from_millis(interval_ms));
-                }
-            });
+                })
+                .expect("failed to spawn memory collector thread");
+            handles.push(("memory", h));
         }
 
         // Channels for thread expansion requests.
@@ -99,73 +121,85 @@ impl CollectorHub {
         // Process collector thread.
         {
             let state = Arc::clone(&proc_state);
-            spawn_thread(move || {
-                let mut collector =
-                    process::ProcessCollector::new(thread_req_rx, thread_res_tx);
-                loop {
-                    let mut snapshot = collector.collect();
+            let h = ThreadBuilder::new()
+                .name("wtop-process".into())
+                .spawn(move || {
+                    let mut collector =
+                        process::ProcessCollector::new(thread_req_rx, thread_res_tx);
+                    loop {
+                        let mut snapshot = collector.collect();
 
-                    // Build a preservation map (pid → (expanded, threads)) using a
-                    // read lock — cheaper and shorter-held than a write lock.
-                    let mut preserve: HashMap<u32, (bool, Vec<ThreadEntry>)> = {
-                        if let Ok(s) = state.read() {
-                            s.iter()
-                                .filter(|p| p.expanded || !p.threads.is_empty())
-                                .map(|p| (p.pid, (p.expanded, p.threads.clone())))
-                                .collect()
-                        } else {
-                            HashMap::new()
-                        }
-                    };
+                        // Drain expanded/thread state via a write lock so we can move
+                        // the thread Vecs out (mem::take) instead of cloning them.
+                        let mut preserve: HashMap<u32, (bool, Vec<ThreadEntry>)> = {
+                            if let Ok(mut s) = state.write() {
+                                s.iter_mut()
+                                    .filter(|p| p.expanded || !p.threads.is_empty())
+                                    .map(|p| (p.pid, (p.expanded, std::mem::take(&mut p.threads))))
+                                    .collect()
+                            } else {
+                                HashMap::new()
+                            }
+                        };
 
-                    // Merge preserved state into the new snapshot.
-                    for entry in snapshot.iter_mut() {
-                        if let Some((expanded, threads)) = preserve.remove(&entry.pid) {
-                            entry.expanded = expanded;
-                            if !threads.is_empty() {
-                                entry.threads = threads; // move, not clone
+                        // Merge preserved state into the new snapshot.
+                        for entry in snapshot.iter_mut() {
+                            if let Some((expanded, threads)) = preserve.remove(&entry.pid) {
+                                entry.expanded = expanded;
+                                if !threads.is_empty() {
+                                    entry.threads = threads; // move, not clone
+                                }
                             }
                         }
-                    }
 
-                    // Write lock only for the swap — minimal critical section.
-                    if let Ok(mut s) = state.write() {
-                        *s = snapshot;
-                    }
+                        // Write lock only for the swap — minimal critical section.
+                        if let Ok(mut s) = state.write() {
+                            *s = snapshot;
+                        }
 
-                    sleep_thread(Duration::from_millis(interval_ms * 2));
-                }
-            });
+                        sleep_thread(Duration::from_millis(interval_ms * 2));
+                    }
+                })
+                .expect("failed to spawn process collector thread");
+            handles.push(("process", h));
         }
 
         // Disk collector thread.
         {
             let state = Arc::clone(&disk_state);
-            spawn_thread(move || {
-                let mut collector = disk::DiskCollector::new();
-                loop {
-                    let snapshot = collector.collect();
-                    if let Ok(mut s) = state.write() {
-                        *s = snapshot;
+            let h = ThreadBuilder::new()
+                .name("wtop-disk".into())
+                .spawn(move || {
+                    let mut collector = disk::DiskCollector::new();
+                    loop {
+                        let snapshot = collector.collect();
+                        if let Ok(mut s) = state.write() {
+                            *s = snapshot;
+                        }
+                        sleep_thread(Duration::from_millis(interval_ms));
                     }
-                    sleep_thread(Duration::from_millis(interval_ms));
-                }
-            });
+                })
+                .expect("failed to spawn disk collector thread");
+            handles.push(("disk", h));
         }
 
         // Network collector thread.
         {
             let state = Arc::clone(&net_state);
-            spawn_thread(move || {
-                let mut collector = network::NetCollector::new();
-                loop {
-                    let snapshot = collector.collect();
-                    if let Ok(mut s) = state.write() {
-                        *s = snapshot;
+            let h = ThreadBuilder::new()
+                .name("wtop-network".into())
+                .spawn(move || {
+                    let mut collector = network::NetCollector::new();
+                    loop {
+                        let snapshot = collector.collect();
+                        if let Ok(mut s) = state.write() {
+                            *s = snapshot;
+                        }
+                        sleep_thread(Duration::from_millis(interval_ms));
                     }
-                    sleep_thread(Duration::from_millis(interval_ms));
-                }
-            });
+                })
+                .expect("failed to spawn network collector thread");
+            handles.push(("network", h));
         }
 
         Self {
@@ -176,6 +210,7 @@ impl CollectorHub {
             networks: net_state,
             thread_request_tx: thread_req_tx,
             thread_result_rx: thread_res_rx,
+            collector_handles: handles,
         }
     }
 }

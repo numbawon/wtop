@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use super::thread::ThreadEntry;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,14 +9,20 @@ pub enum ProcessStatus {
     Unknown,
 }
 
+impl ProcessStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProcessStatus::Running   => "Running",
+            ProcessStatus::Suspended => "Suspend",
+            ProcessStatus::Zombie    => "Zombie",
+            ProcessStatus::Unknown   => "Unknown",
+        }
+    }
+}
+
 impl std::fmt::Display for ProcessStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProcessStatus::Running => write!(f, "Running"),
-            ProcessStatus::Suspended => write!(f, "Suspend"),
-            ProcessStatus::Zombie => write!(f, "Zombie"),
-            ProcessStatus::Unknown => write!(f, "Unknown"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -25,8 +32,7 @@ pub struct ProcessEntry {
     pub name: String,
     pub cpu_pct: f32,
     pub mem_bytes: u64,
-    pub mem_pct: f32,
-    pub user: String,
+    pub user: Arc<str>,
     pub status: ProcessStatus,
     pub thread_count: u32,
     pub disk_read_bps: u64,
@@ -35,6 +41,16 @@ pub struct ProcessEntry {
     pub expanded: bool,
     /// Populated on demand when user expands the row.
     pub threads: Vec<ThreadEntry>,
+
+    // Pre-formatted display strings — computed once per collection cycle,
+    // borrowed by the render path to avoid per-frame allocations.
+    pub pid_str: String,
+    pub cpu_pct_str: String,
+    pub mem_str: String,
+    pub mem_pct_str: String,
+    pub thread_count_str: String,
+    pub disk_read_str: String,
+    pub disk_write_str: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

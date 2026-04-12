@@ -120,7 +120,7 @@ fn render_sparkline(
     snapshot: &CpuSnapshot,
     theme: &Theme,
 ) {
-    let data = snapshot.aggregate_history.as_u64_vec();
+    let history = &snapshot.aggregate_history.data;
     let label = format!("Aggregate {:>5.1}%", snapshot.aggregate_pct);
 
     // Render the label as the block title; the bar fills the 1-row inner area.
@@ -134,13 +134,12 @@ fn render_sparkline(
     }
 
     let w = inner.width as usize;
-    let len = data.len();
-    let offset = len.saturating_sub(w);
+    let offset = history.len().saturating_sub(w);
 
     // Build a row of per-value-coloured block-element spans.
     let spans: Vec<Span> = (0..w)
         .map(|col| {
-            let v = data.get(offset + col).copied().unwrap_or(0);
+            let v = history.get(offset + col).copied().unwrap_or(0.0) as u64;
             let idx = ((v as f64 / 100.0) * 8.0).round().clamp(0.0, 8.0) as usize;
             let color = theme.spark_color(v as f64);
             Span::styled(theme.spark_chars[idx], Style::default().fg(color))

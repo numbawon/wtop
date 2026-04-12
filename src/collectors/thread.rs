@@ -116,6 +116,12 @@ fn query_all_thread_states() -> HashMap<u32, (ThreadState, u32)> {
         None => return map,
     };
 
+    // Safety: GetProcAddress returns a type-erased fn pointer. We transmute it to
+    // NtQuerySystemInformationFn, whose signature matches the documented
+    // NtQuerySystemInformation(Class, Buffer, Length, ReturnLength) -> NTSTATUS
+    // "system" (stdcall on x64 = System V AMD64) calling convention. The
+    // compile-time size assertions above verify the struct layouts we read from
+    // the returned buffer are correct for 64-bit Windows.
     let nt_query: NtQuerySystemInformationFn =
         unsafe { std::mem::transmute(proc_addr) };
 
@@ -317,6 +323,12 @@ fn get_thread_start_address(handle: windows::Win32::Foundation::HANDLE) -> Optio
         *mut u32,
     ) -> i32;
 
+    // Safety: GetProcAddress returns a type-erased fn pointer. We transmute it to
+    // NtQueryInformationThreadFn, whose signature matches the documented
+    // NtQueryInformationThread(ThreadHandle, Class, Information, Length, ReturnLength)
+    // -> NTSTATUS "system" calling convention. We only use class 9
+    // (ThreadQuerySetWin32StartAddress) which writes a single u64 into a
+    // caller-provided buffer — the size check (sizeof::<u64>) is passed explicitly.
     let nt_query: NtQueryInformationThreadFn =
         unsafe { std::mem::transmute(proc_addr) };
 

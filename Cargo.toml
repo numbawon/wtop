@@ -5,6 +5,9 @@ edition = "2021"
 description = "A Windows terminal system monitor — htop for Windows"
 license = "MIT"
 repository = "https://github.com/NumbaWon/wtop"
+authors = ["Chad Collins"]
+keywords = ["htop", "system-monitor", "windows", "tui", "terminal"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "wtop"

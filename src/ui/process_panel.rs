@@ -1,4 +1,3 @@
-use bytesize::ByteSize;
 use ratatui::{
     layout::{Constraint, Rect},
     style::Style,
@@ -157,37 +156,32 @@ pub fn render(
 
 fn build_cell<'a>(
     id: &ProcessColumnId,
-    proc: &ProcessEntry,
+    proc: &'a ProcessEntry,
     expand_marker: &str,
     row_style: Style,
-    theme: &Theme,
+    theme: &'a Theme,
 ) -> Cell<'a> {
     match id {
-        ProcessColumnId::Pid => Cell::from(proc.pid.to_string()),
+        ProcessColumnId::Pid => Cell::from(proc.pid_str.as_str()),
         ProcessColumnId::Name => Cell::from(format!("{} {}", expand_marker, proc.name)),
         ProcessColumnId::CpuPct => {
             // 3-char inline mini bar + padded percentage.
             // Total width = 3 + 1 space + 6 (" XX.X%") = 10 → col_constraint is Length(10).
             let bar = build_block_bar(proc.cpu_pct as f64 / 100.0, 3);
-            let pct = format!(" {:>5.1}%", proc.cpu_pct);
             Cell::from(Line::from(vec![
                 Span::styled(bar, theme.gauge_for_pct(proc.cpu_pct as f64)),
-                Span::styled(pct, row_style),
+                Span::styled(proc.cpu_pct_str.as_str(), row_style),
             ]))
         }
-        ProcessColumnId::Mem => Cell::from(ByteSize(proc.mem_bytes).to_string()),
-        ProcessColumnId::MemPct => Cell::from(format!("{:>4.1}%", proc.mem_pct)),
-        ProcessColumnId::Threads => Cell::from(proc.thread_count.to_string()),
+        ProcessColumnId::Mem => Cell::from(proc.mem_str.as_str()),
+        ProcessColumnId::MemPct => Cell::from(proc.mem_pct_str.as_str()),
+        ProcessColumnId::Threads => Cell::from(proc.thread_count_str.as_str()),
         ProcessColumnId::Status => {
-            Cell::from(proc.status.to_string()).style(status_style(proc, theme))
+            Cell::from(proc.status.as_str()).style(status_style(proc, theme))
         }
         ProcessColumnId::User => Cell::from(super::truncate(&proc.user, 12)),
-        ProcessColumnId::DiskRead => {
-            Cell::from(format!("{}/s", ByteSize(proc.disk_read_bps)))
-        }
-        ProcessColumnId::DiskWrite => {
-            Cell::from(format!("{}/s", ByteSize(proc.disk_write_bps)))
-        }
+        ProcessColumnId::DiskRead => Cell::from(proc.disk_read_str.as_str()),
+        ProcessColumnId::DiskWrite => Cell::from(proc.disk_write_str.as_str()),
     }
 }
 

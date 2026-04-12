@@ -57,6 +57,10 @@ pub enum LayoutMode {
     Stacked,
 }
 
+impl Default for LayoutMode {
+    fn default() -> Self { Self::Auto }
+}
+
 impl LayoutMode {
     pub fn cycle(&self) -> Self {
         match self {
@@ -100,7 +104,11 @@ pub enum GaugeStyle {
 }
 
 /// Application configuration — persisted to %APPDATA%\wtop\config.toml.
+///
+/// `#[serde(default)]` ensures that fields added in future versions will
+/// deserialize to their `Default` value rather than failing on old config files.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     /// How often collectors refresh data, in milliseconds.
     pub refresh_interval_ms: u64,
@@ -119,6 +127,7 @@ pub struct Config {
     /// Whether the Network panel is visible.
     pub show_network: bool,
     /// Ordered, per-column visibility for the process table.
+    #[serde(default = "default_process_columns")]
     pub process_columns: Vec<ProcessColumn>,
     /// Force ASCII borders and sparkline chars regardless of NO_COLOR.
     pub ascii_mode: bool,
@@ -133,6 +142,10 @@ pub enum ThemeName {
     CatppuccinMocha,
     Nord,
     TokyoNight,
+}
+
+impl Default for ThemeName {
+    fn default() -> Self { Self::Dark }
 }
 
 impl ThemeName {
@@ -209,14 +222,22 @@ impl Config {
         Self::default()
     }
 
-    /// Persist config to %APPDATA%\wtop\config.toml. Silently ignores errors.
+    /// Persist config to %APPDATA%\wtop\config.toml.
     pub fn save(&self) {
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!("Failed to create config directory: {e}");
+                return;
+            }
         }
-        if let Ok(text) = toml::to_string_pretty(self) {
-            let _ = std::fs::write(path, text);
+        match toml::to_string_pretty(self) {
+            Ok(text) => {
+                if let Err(e) = std::fs::write(&path, text) {
+                    tracing::warn!("Failed to save config to {}: {e}", path.display());
+                }
+            }
+            Err(e) => tracing::warn!("Failed to serialize config: {e}"),
         }
     }
 }

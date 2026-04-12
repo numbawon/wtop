@@ -40,6 +40,11 @@ pub struct Theme {
     pub text_normal: Style,
     pub text_bright: Style,
 
+    /// Background applied to overlay panels and unset table rows.
+    /// Set to an explicit white on light themes so black text is always visible
+    /// regardless of the terminal's default background colour.
+    pub panel_bg: Style,
+
     /// Box-drawing characters used for all panel borders.
     pub border_set: symbols::border::Set,
     /// How CPU / memory gauge bars are rendered.
@@ -101,8 +106,6 @@ impl Theme {
             gauge_medium: Style::default().fg(Color::Yellow),
             gauge_high:   Style::default().fg(Color::Red),
 
-
-
             row_normal:    Style::default().fg(Color::White),
             row_zebra:     Style::default().fg(Color::White).bg(Color::Rgb(22, 22, 32)),
             row_selected:  Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
@@ -120,6 +123,7 @@ impl Theme {
             text_normal: Style::default().fg(Color::White),
             text_bright: Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
 
+            panel_bg:   Style::default(),
             border_set: symbols::border::PLAIN,
             gauge_style: GaugeStyle::Block,
             spark_low:  Color::Green,
@@ -130,39 +134,52 @@ impl Theme {
     }
 
     pub fn default_light() -> Self {
+        let white     = Color::White;
+        let black     = Color::Black;
+        let blue      = Color::Blue;
+        let gray      = Color::Gray;
+        let dark_gray = Color::DarkGray;
+        let green     = Color::Rgb(0, 140, 0);
+        let amber     = Color::Rgb(180, 120, 0);
+        let red       = Color::Red;
+        let zebra_bg  = Color::Rgb(230, 235, 250);
+
         Self {
-            border:         Style::default().fg(Color::Gray),
-            border_focused: Style::default().fg(Color::Blue),
-            title:          Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-            header:         Style::default().fg(Color::Rgb(160, 90, 0)).add_modifier(Modifier::BOLD),
+            border:         Style::default().fg(gray),
+            border_focused: Style::default().fg(blue),
+            title:          Style::default().fg(blue).add_modifier(Modifier::BOLD),
+            header:         Style::default().fg(Color::Rgb(130, 70, 0)).add_modifier(Modifier::BOLD).bg(white),
 
-            gauge_low:    Style::default().fg(Color::Rgb(0, 140, 0)),
-            gauge_medium: Style::default().fg(Color::Rgb(180, 120, 0)),
-            gauge_high:   Style::default().fg(Color::Red),
+            gauge_low:    Style::default().fg(green),
+            gauge_medium: Style::default().fg(amber),
+            gauge_high:   Style::default().fg(red),
 
+            // Explicit white background on every row style so black text is
+            // readable regardless of the terminal's default background colour.
+            row_normal:    Style::default().fg(black).bg(white),
+            row_zebra:     Style::default().fg(black).bg(zebra_bg),
+            row_selected:  Style::default().fg(white).bg(blue).add_modifier(Modifier::BOLD),
+            row_thread:    Style::default().fg(dark_gray).bg(white),
+            row_suspicious: Style::default().fg(red).add_modifier(Modifier::BOLD).bg(white),
 
-            row_normal:    Style::default().fg(Color::Black),
-            row_zebra:     Style::default().fg(Color::Black).bg(Color::Rgb(236, 240, 252)),
-            row_selected:  Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD),
-            row_thread:    Style::default().fg(Color::Gray),
-            row_suspicious: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            status_running:   Style::default().fg(green),
+            status_suspended: Style::default().fg(amber),
+            status_other:     Style::default().fg(gray),
 
-            status_running:   Style::default().fg(Color::Rgb(0, 140, 0)),
-            status_suspended: Style::default().fg(Color::Rgb(180, 120, 0)),
-            status_other:     Style::default().fg(Color::Gray),
+            filter_active:   Style::default().fg(white).bg(blue),
+            filter_inactive: Style::default().fg(gray),
 
-            filter_active:   Style::default().fg(Color::White).bg(Color::Blue),
-            filter_inactive: Style::default().fg(Color::Gray),
+            text_dim:    Style::default().fg(dark_gray),
+            text_normal: Style::default().fg(black),
+            text_bright: Style::default().fg(black).add_modifier(Modifier::BOLD),
 
-            text_dim:    Style::default().fg(Color::Gray),
-            text_normal: Style::default().fg(Color::Black),
-            text_bright: Style::default().fg(Color::Black).add_modifier(Modifier::BOLD),
-
+            // White panel background ensures overlay text is always readable.
+            panel_bg:   Style::default().bg(white),
             border_set: symbols::border::PLAIN,
             gauge_style: GaugeStyle::Block,
-            spark_low:  Color::Rgb(0, 140, 0),
-            spark_mid:  Color::Rgb(180, 120, 0),
-            spark_high: Color::Red,
+            spark_low:  green,
+            spark_mid:  amber,
+            spark_high: red,
             spark_chars: SPARK_CHARS,
         }
     }
@@ -211,6 +228,7 @@ impl Theme {
             text_normal: Style::default().fg(fg),
             text_bright: Style::default().fg(cyan).add_modifier(Modifier::BOLD),
 
+            panel_bg:   Style::default(),
             border_set: symbols::border::ROUNDED,
             gauge_style: GaugeStyle::Line,
             spark_low:  green,
@@ -265,6 +283,7 @@ impl Theme {
             text_normal: Style::default().fg(fg),
             text_bright: Style::default().fg(blue).add_modifier(Modifier::BOLD),
 
+            panel_bg:   Style::default(),
             border_set: symbols::border::PLAIN,
             gauge_style: GaugeStyle::Block,
             spark_low:  green,
@@ -320,6 +339,7 @@ impl Theme {
             text_normal: Style::default().fg(text),
             text_bright: Style::default().fg(blue).add_modifier(Modifier::BOLD),
 
+            panel_bg:   Style::default(),
             border_set: symbols::border::ROUNDED,
             gauge_style: GaugeStyle::Segmented,
             spark_low:  green,
@@ -375,6 +395,7 @@ impl Theme {
             text_normal: Style::default().fg(snow1),
             text_bright: Style::default().fg(frost3).add_modifier(Modifier::BOLD),
 
+            panel_bg:   Style::default(),
             border_set: symbols::border::ROUNDED,
             gauge_style: GaugeStyle::Line,
             spark_low:  green,
@@ -430,6 +451,7 @@ impl Theme {
             text_normal: Style::default().fg(fg),
             text_bright: Style::default().fg(purple).add_modifier(Modifier::BOLD),
 
+            panel_bg:   Style::default(),
             border_set: symbols::border::ROUNDED,
             gauge_style: GaugeStyle::Segmented,
             spark_low:  green,
@@ -485,6 +507,7 @@ impl Theme {
                 horizontal_top:   "-",
                 horizontal_bottom: "-",
             },
+            panel_bg:   Style::default(),
             gauge_style: GaugeStyle::Ascii,
             spark_low:  Color::Reset,
             spark_mid:  Color::Reset,

@@ -20,6 +20,9 @@ pub struct DiskCollector {
     counter_write: isize,
     counter_util: isize,
     valid: bool,
+    /// Reusable byte buffer for PDH counter array reads — grows to the
+    /// largest observed buffer size, then stays there.
+    scratch_buf: Vec<u8>,
 }
 
 // PDH handles are not Send by default (Windows raw handles / isize).
@@ -35,6 +38,7 @@ impl DiskCollector {
             counter_write: 0,
             counter_util: 0,
             valid: false,
+            scratch_buf: Vec::new(),
         };
 
         unsafe {
@@ -92,6 +96,7 @@ impl DiskCollector {
                 counter_write,
                 counter_util,
                 valid: true,
+                scratch_buf: Vec::new(),
             }
         }
     }
@@ -107,9 +112,11 @@ impl DiskCollector {
             }
         }
 
-        let reads = self.sample_counter(self.counter_read);
-        let writes = self.sample_counter(self.counter_write);
-        let utils = self.sample_counter(self.counter_util);
+        // Copy the counter handles (isize = Copy) before the &mut self borrow.
+        let (cr, cw, cu) = (self.counter_read, self.counter_write, self.counter_util);
+        let reads = self.sample_counter(cr);
+        let writes = self.sample_counter(cw);
+        let utils = self.sample_counter(cu);
 
         // Merge the three counter arrays by instance name, dropping the
         // synthetic "_Total" rollup that PDH always includes.
@@ -142,7 +149,7 @@ impl DiskCollector {
     }
 
     /// Read all instances of a wildcard PDH counter as `(instance_name, u64_value)`.
-    fn sample_counter(&self, counter: isize) -> Vec<(String, u64)> {
+    fn sample_counter(&mut self, counter: isize) -> Vec<(String, u64)> {
         unsafe {
             let mut buf_size: u32 = 0;
             let mut item_count: u32 = 0;
@@ -163,9 +170,10 @@ impl DiskCollector {
                 return Vec::new();
             }
 
-            // Allocate a byte buffer, then reinterpret as an array of items.
-            let mut buf: Vec<u8> = vec![0u8; buf_size as usize];
-            let items_ptr = buf.as_mut_ptr() as *mut PDH_FMT_COUNTERVALUE_ITEM_W;
+            // Reuse the scratch buffer — grows to the high-water mark and stays there.
+            self.scratch_buf.clear();
+            self.scratch_buf.resize(buf_size as usize, 0u8);
+            let items_ptr = self.scratch_buf.as_mut_ptr() as *mut PDH_FMT_COUNTERVALUE_ITEM_W;
 
             let status2 = PdhGetFormattedCounterArrayW(
                 counter,

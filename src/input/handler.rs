@@ -86,7 +86,9 @@ pub fn handle_key(
     // When the settings panel is open, only settings keys work.
     if settings_active {
         return match (key.modifiers, key.code) {
-            (_, KeyCode::Esc) | (KeyModifiers::SHIFT, KeyCode::Char('C')) => AppAction::ToggleSettings,
+            (_, KeyCode::Esc)
+            | (KeyModifiers::SHIFT, KeyCode::Char('C'))
+            | (KeyModifiers::SHIFT, KeyCode::Char('c')) => AppAction::ToggleSettings,
             (_, KeyCode::Up)   | (_, KeyCode::Char('k')) => AppAction::SettingsUp,
             (_, KeyCode::Down) | (_, KeyCode::Char('j')) => AppAction::SettingsDown,
             (_, KeyCode::Enter) | (_, KeyCode::Right)    => AppAction::SettingsActivate,
@@ -110,7 +112,7 @@ pub fn handle_key(
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => AppAction::Quit,
         (_, KeyCode::Char('q')) => AppAction::Quit,
         (_, KeyCode::Up) => AppAction::MoveUp,
-        (_, KeyCode::Char('k')) => AppAction::MoveUp,
+        (KeyModifiers::NONE, KeyCode::Char('k')) => AppAction::MoveUp,
         (_, KeyCode::Down) => AppAction::MoveDown,
         (_, KeyCode::Char('j')) => AppAction::MoveDown,
         (_, KeyCode::PageUp) => AppAction::PageUp,
@@ -120,11 +122,11 @@ pub fn handle_key(
         (_, KeyCode::Enter) => AppAction::ExpandCollapse,
         (_, KeyCode::Tab) => AppAction::NextPanel,
         (KeyModifiers::SHIFT, KeyCode::BackTab) => AppAction::PrevPanel,
-        (_, KeyCode::Char('s')) => AppAction::SortNext,
-        (KeyModifiers::SHIFT, KeyCode::Char('S')) => AppAction::SortPrev,
+        (KeyModifiers::NONE, KeyCode::Char('s')) => AppAction::SortNext,
+        (KeyModifiers::SHIFT, KeyCode::Char('S')) | (KeyModifiers::SHIFT, KeyCode::Char('s')) => AppAction::SortPrev,
         (_, KeyCode::Char('r')) => AppAction::ToggleSortOrder,
         (_, KeyCode::Char('f')) => AppAction::OpenFilter,
-        (KeyModifiers::SHIFT, KeyCode::Char('K')) => AppAction::KillProcess,
+        (KeyModifiers::SHIFT, KeyCode::Char('K')) | (KeyModifiers::SHIFT, KeyCode::Char('k')) => AppAction::KillProcess,
         (_, KeyCode::Char('p')) => AppAction::ToggleSystemProcesses,
         (_, KeyCode::Char('u')) => AppAction::ToggleUserFilter,
         (_, KeyCode::Char('+')) => AppAction::IncreaseRefresh,
@@ -135,9 +137,9 @@ pub fn handle_key(
         (KeyModifiers::SHIFT, KeyCode::Char('L')) => AppAction::CycleLayout,
         (_, KeyCode::Char('d')) => AppAction::ToggleDisk,
         (_, KeyCode::Char('n')) => AppAction::ToggleNetwork,
-        (_, KeyCode::Char('c')) => AppAction::ToggleDiskColumns,
+        (KeyModifiers::NONE, KeyCode::Char('c')) => AppAction::ToggleDiskColumns,
         (_, KeyCode::Char('w')) => AppAction::ToggleWtPanel,
-        (KeyModifiers::SHIFT, KeyCode::Char('C')) => AppAction::ToggleSettings,
+        (KeyModifiers::SHIFT, KeyCode::Char('C')) | (KeyModifiers::SHIFT, KeyCode::Char('c')) => AppAction::ToggleSettings,
         _ => AppAction::None,
     }
 }

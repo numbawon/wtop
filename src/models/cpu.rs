@@ -22,13 +22,7 @@ impl<T: Copy + Default> RingBuffer<T> {
         self.data.push_back(val);
     }
 
-    /// Returns a Vec suitable for passing to ratatui Sparkline (which wants u64).
-    pub fn as_u64_vec(&self) -> Vec<u64>
-    where
-        T: Into<f64> + Copy,
-    {
-        self.data.iter().map(|v| (*v).into() as u64).collect()
-    }
+
 }
 
 /// Snapshot of a single logical CPU core.

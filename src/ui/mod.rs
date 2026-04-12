@@ -12,7 +12,6 @@ pub mod theme;
 pub mod settings_panel;
 pub mod wt_panel;
 
-use chrono::Local;
 use ratatui::{
     layout::Rect,
     text::{Line, Span},
@@ -123,7 +122,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 }
 
 fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let now = Local::now().format("%H:%M:%S").to_string();
+    let now = &state.cached_time;
     let refresh = format!("{}ms", state.config.refresh_interval_ms);
 
     if state.filter_active || !state.filter_text.is_empty() {
@@ -165,7 +164,7 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
             user_filter_span,
             Span::styled(&refresh, theme.text_dim),
             Span::styled("  ", theme.text_dim),
-            Span::styled(&now, theme.text_dim),
+            Span::styled(now.as_str(), theme.text_dim),
         ]);
         let para = Paragraph::new(line);
         frame.render_widget(para, area);

@@ -30,7 +30,9 @@ impl CpuCollector {
         }
 
         // Ensure at least 200ms between refreshes so deltas are meaningful.
-        let elapsed = self.last_collect.unwrap().elapsed();
+        let elapsed = self.last_collect
+            .expect("last_collect is Some — the is_none() branch above returned early")
+            .elapsed();
         if elapsed < Duration::from_millis(200) {
             std::thread::sleep(Duration::from_millis(200) - elapsed);
         }
