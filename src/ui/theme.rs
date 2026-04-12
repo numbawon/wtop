@@ -36,7 +36,6 @@ pub struct Theme {
     pub filter_active: Style,
     pub filter_inactive: Style,
 
-    pub help_bg: Style,
     pub text_dim: Style,
     pub text_normal: Style,
     pub text_bright: Style,
@@ -117,7 +116,6 @@ impl Theme {
             filter_active:   Style::default().fg(Color::Black).bg(Color::Yellow),
             filter_inactive: Style::default().fg(Color::DarkGray),
 
-            help_bg:     Style::default().bg(Color::DarkGray),
             text_dim:    Style::default().fg(Color::DarkGray),
             text_normal: Style::default().fg(Color::White),
             text_bright: Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
@@ -156,7 +154,6 @@ impl Theme {
             filter_active:   Style::default().fg(Color::White).bg(Color::Blue),
             filter_inactive: Style::default().fg(Color::Gray),
 
-            help_bg:     Style::default().bg(Color::Gray),
             text_dim:    Style::default().fg(Color::Gray),
             text_normal: Style::default().fg(Color::Black),
             text_bright: Style::default().fg(Color::Black).add_modifier(Modifier::BOLD),
@@ -209,7 +206,7 @@ impl Theme {
             filter_active:   Style::default().fg(Color::Black).bg(yellow),
             filter_inactive: Style::default().fg(comment),
 
-            help_bg:     Style::default().bg(bg_sel),
+
             text_dim:    Style::default().fg(comment),
             text_normal: Style::default().fg(fg),
             text_bright: Style::default().fg(cyan).add_modifier(Modifier::BOLD),
@@ -263,7 +260,7 @@ impl Theme {
             filter_active:   Style::default().fg(Color::Black).bg(yellow),
             filter_inactive: Style::default().fg(gray),
 
-            help_bg:     Style::default().bg(bg_sel),
+
             text_dim:    Style::default().fg(gray),
             text_normal: Style::default().fg(fg),
             text_bright: Style::default().fg(blue).add_modifier(Modifier::BOLD),
@@ -318,7 +315,7 @@ impl Theme {
             filter_active:   Style::default().fg(Color::Black).bg(yellow),
             filter_inactive: Style::default().fg(overlay0),
 
-            help_bg:     Style::default().bg(surface1),
+
             text_dim:    Style::default().fg(overlay0),
             text_normal: Style::default().fg(text),
             text_bright: Style::default().fg(blue).add_modifier(Modifier::BOLD),
@@ -373,7 +370,7 @@ impl Theme {
             filter_active:   Style::default().fg(Color::Black).bg(frost2),
             filter_inactive: Style::default().fg(polar4),
 
-            help_bg:     Style::default().bg(polar3),
+
             text_dim:    Style::default().fg(polar4),
             text_normal: Style::default().fg(snow1),
             text_bright: Style::default().fg(frost3).add_modifier(Modifier::BOLD),
@@ -428,7 +425,7 @@ impl Theme {
             filter_active:   Style::default().fg(Color::Black).bg(yellow),
             filter_inactive: Style::default().fg(comment),
 
-            help_bg:     Style::default().bg(sel),
+
             text_dim:    Style::default().fg(comment),
             text_normal: Style::default().fg(fg),
             text_bright: Style::default().fg(purple).add_modifier(Modifier::BOLD),
@@ -473,7 +470,7 @@ impl Theme {
             filter_active:   invert,
             filter_inactive: dim,
 
-            help_bg:     normal,
+
             text_dim:    dim,
             text_normal: normal,
             text_bright: bold,

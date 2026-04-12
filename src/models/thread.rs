@@ -22,7 +22,6 @@ impl std::fmt::Display for ThreadState {
 #[derive(Clone, Debug)]
 pub struct ThreadEntry {
     pub tid: u32,
-    pub owner_pid: u32,
     pub state: ThreadState,
     /// Kernel + user CPU time combined in milliseconds.
     pub cpu_time_ms: u64,
@@ -30,6 +29,7 @@ pub struct ThreadEntry {
     /// Module name of the thread's start address (e.g. "ntdll.dll").
     pub start_module: String,
     /// Raw start address — shown for flagged threads.
+    #[allow(dead_code)]
     pub start_address: u64,
     /// True if the start address resolves to a module NOT in the process module list.
     /// Heuristic indicator for potential DLL injection.

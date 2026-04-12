@@ -135,8 +135,6 @@ impl DiskCollector {
                 read_bps: *read_bps,
                 write_bps,
                 utilization_pct: util_pct,
-                read_total_bytes: 0,
-                write_total_bytes: 0,
             });
         }
 

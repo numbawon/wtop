@@ -5,8 +5,6 @@ pub struct DiskSnapshot {
     pub device_name: String,
     pub read_bps: u64,
     pub write_bps: u64,
-    pub read_total_bytes: u64,
-    pub write_total_bytes: u64,
     /// From PDH "% Disk Time" counter (0–100).
     pub utilization_pct: f32,
 }

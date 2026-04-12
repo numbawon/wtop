@@ -260,7 +260,6 @@ fn build_thread_entry(
 
     ThreadEntry {
         tid,
-        owner_pid: pid,
         state,
         wait_reason,
         cpu_time_ms,

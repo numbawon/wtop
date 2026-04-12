@@ -1,7 +1,6 @@
 mod app;
 mod collectors;
 mod config;
-mod error;
 mod glyphs;
 mod input;
 mod models;
