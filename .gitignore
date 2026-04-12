@@ -1,4 +1,5 @@
 /target
+.claude/
 *.log
 wtop.log
 .env
