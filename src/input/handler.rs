@@ -38,6 +38,11 @@ pub enum AppAction {
     WtConfirmNerdFont,
     WtApplyNerdFont,
     WtCancelNerdFont,
+    ToggleSettings,
+    SettingsUp,
+    SettingsDown,
+    SettingsActivate,
+    SettingsActivateBack,
     None,
 }
 
@@ -48,6 +53,7 @@ pub fn handle_key(
     kill_confirm_active: bool,
     wt_panel_active: bool,
     wt_nerd_font_confirm_active: bool,
+    settings_active: bool,
 ) -> AppAction {
     // When the kill confirm dialog is open, only allow confirm or cancel.
     if kill_confirm_active {
@@ -73,6 +79,18 @@ pub fn handle_key(
             KeyCode::Esc | KeyCode::Char('q') => AppAction::ToggleWtPanel,
             KeyCode::Char('w') | KeyCode::Char('W') => AppAction::ToggleWtPanel,
             KeyCode::Char('f') | KeyCode::Char('F') => AppAction::WtConfirmNerdFont,
+            _ => AppAction::None,
+        };
+    }
+
+    // When the settings panel is open, only settings keys work.
+    if settings_active {
+        return match (key.modifiers, key.code) {
+            (_, KeyCode::Esc) | (KeyModifiers::SHIFT, KeyCode::Char('C')) => AppAction::ToggleSettings,
+            (_, KeyCode::Up)   | (_, KeyCode::Char('k')) => AppAction::SettingsUp,
+            (_, KeyCode::Down) | (_, KeyCode::Char('j')) => AppAction::SettingsDown,
+            (_, KeyCode::Enter) | (_, KeyCode::Right)    => AppAction::SettingsActivate,
+            (_, KeyCode::Left)                           => AppAction::SettingsActivateBack,
             _ => AppAction::None,
         };
     }
@@ -119,6 +137,7 @@ pub fn handle_key(
         (_, KeyCode::Char('n')) => AppAction::ToggleNetwork,
         (_, KeyCode::Char('c')) => AppAction::ToggleDiskColumns,
         (_, KeyCode::Char('w')) => AppAction::ToggleWtPanel,
+        (KeyModifiers::SHIFT, KeyCode::Char('C')) => AppAction::ToggleSettings,
         _ => AppAction::None,
     }
 }

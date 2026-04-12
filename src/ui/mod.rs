@@ -9,6 +9,7 @@ pub mod memory_panel;
 pub mod network_panel;
 pub mod process_panel;
 pub mod theme;
+pub mod settings_panel;
 pub mod wt_panel;
 
 use chrono::Local;
@@ -114,6 +115,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     if state.show_wt_panel {
         wt_panel::render(frame, area, state, &theme);
+    }
+
+    if state.show_settings {
+        settings_panel::render(frame, area, state, &theme);
     }
 }
 

@@ -78,6 +78,10 @@ pub struct AppState {
     pub show_wt_panel: bool,
     /// Whether the "apply Nerd Font" confirmation sub-dialog is active.
     pub wt_nerd_font_confirm: bool,
+    /// Whether the settings panel overlay is open.
+    pub show_settings: bool,
+    /// Cursor position within the settings panel (0-indexed over selectable items).
+    pub settings_cursor: usize,
 }
 
 impl AppState {
@@ -103,6 +107,8 @@ impl AppState {
             wt_info: WtInfo::detect(),
             show_wt_panel: false,
             wt_nerd_font_confirm: false,
+            show_settings: false,
+            settings_cursor: 0,
         }
     }
 
@@ -283,6 +289,24 @@ impl AppState {
             AppAction::WtCancelNerdFont => {
                 self.wt_nerd_font_confirm = false;
             }
+            AppAction::ToggleSettings => {
+                self.show_settings = !self.show_settings;
+                if !self.show_settings {
+                    self.config.save();
+                }
+            }
+            AppAction::SettingsUp => {
+                if self.settings_cursor > 0 {
+                    self.settings_cursor -= 1;
+                }
+            }
+            AppAction::SettingsDown => {
+                if self.settings_cursor + 1 < crate::ui::settings_panel::SETTINGS_COUNT {
+                    self.settings_cursor += 1;
+                }
+            }
+            AppAction::SettingsActivate => self.apply_setting(true),
+            AppAction::SettingsActivateBack => self.apply_setting(false),
             AppAction::IncreaseRefresh => {
                 self.config.refresh_interval_ms =
                     (self.config.refresh_interval_ms + 250).min(5000);
@@ -290,6 +314,47 @@ impl AppState {
             AppAction::DecreaseRefresh => {
                 self.config.refresh_interval_ms =
                     self.config.refresh_interval_ms.saturating_sub(250).max(250);
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_setting(&mut self, forward: bool) {
+        use crate::config::ProcessColumnId;
+        match self.settings_cursor {
+            0 => self.config.theme = if forward { self.config.theme.cycle() } else { self.config.theme.cycle_back() },
+            1 => self.config.layout_mode = if forward { self.config.layout_mode.cycle() } else { self.config.layout_mode.cycle_back() },
+            2 => self.config.nerd_glyphs = !self.config.nerd_glyphs,
+            3 => self.config.ascii_mode = !self.config.ascii_mode,
+            4 => {
+                self.config.show_disk = !self.config.show_disk;
+                if !self.config.show_disk && self.focused_panel == FocusedPanel::Disk {
+                    self.focused_panel = FocusedPanel::Processes;
+                }
+            }
+            5 => {
+                self.config.show_network = !self.config.show_network;
+                if !self.config.show_network && self.focused_panel == FocusedPanel::Network {
+                    self.focused_panel = FocusedPanel::Processes;
+                }
+            }
+            6 => {
+                let shown = self.config.process_columns
+                    .iter()
+                    .any(|c| c.id == ProcessColumnId::DiskRead && c.visible);
+                for col in self.config.process_columns.iter_mut() {
+                    if col.id == ProcessColumnId::DiskRead || col.id == ProcessColumnId::DiskWrite {
+                        col.visible = !shown;
+                    }
+                }
+            }
+            7 => self.config.show_system_processes = !self.config.show_system_processes,
+            8 => {
+                if forward {
+                    self.config.refresh_interval_ms = (self.config.refresh_interval_ms + 250).min(5000);
+                } else {
+                    self.config.refresh_interval_ms = self.config.refresh_interval_ms.saturating_sub(250).max(250);
+                }
             }
             _ => {}
         }
@@ -440,8 +505,10 @@ fn event_loop(
                     state.show_kill_confirm,
                     state.show_wt_panel,
                     state.wt_nerd_font_confirm,
+                    state.show_settings,
                 );
                 if action == AppAction::Quit {
+                    state.config.save();
                     return Ok(());
                 }
                 state.dispatch(action, visible_count);

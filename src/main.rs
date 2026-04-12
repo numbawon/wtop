@@ -16,12 +16,12 @@ use tracing_subscriber::EnvFilter;
 #[command(name = "wtop", about = "htop-style system monitor for Windows")]
 struct Args {
     /// Refresh interval in milliseconds (250–5000)
-    #[arg(short, long, default_value_t = 1000)]
-    interval: u64,
+    #[arg(short, long)]
+    interval: Option<u64>,
 
-    /// Color theme: dark or light
-    #[arg(short, long, default_value = "dark")]
-    theme: String,
+    /// Color theme: dark, light, dracula, gruvbox, catppuccin, nord, tokyo_night
+    #[arg(short, long)]
+    theme: Option<String>,
 
     /// Log verbosity (off, error, warn, info, debug, trace)
     #[arg(long, default_value = "warn")]
@@ -43,35 +43,34 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Initialize file-based logging so stdout stays clean for the TUI.
     init_logging(&args.log_level)?;
 
-    let nerd_glyphs = if args.no_nerd_glyphs {
-        false
-    } else if args.nerd_glyphs {
-        true
-    } else {
-        // Auto-hint: if running inside Windows Terminal, default to enabled so
-        // users who have already applied a Nerd Font get icons immediately.
-        std::env::var("WT_SESSION").is_ok()
-    };
+    // Start from saved config, then let CLI flags override.
+    let mut config = Config::load();
 
-    let config = Config {
-        refresh_interval_ms: args.interval.clamp(250, 5000),
-        theme: match args.theme.to_lowercase().as_str() {
-            "light"            => ThemeName::Light,
-            "dracula"          => ThemeName::Dracula,
-            "gruvbox"          => ThemeName::Gruvbox,
-            "catppuccin"       => ThemeName::CatppuccinMocha,
-            "catppuccin_mocha" => ThemeName::CatppuccinMocha,
-            "nord"             => ThemeName::Nord,
-            "tokyo_night" | "tokyonight" => ThemeName::TokyoNight,
-            _                  => ThemeName::Dark,
-        },
-        nerd_glyphs,
-        ascii_mode: args.ascii || std::env::var("NO_COLOR").is_ok(),
-        ..Config::default()
-    };
+    if let Some(ms) = args.interval {
+        config.refresh_interval_ms = ms.clamp(250, 5000);
+    }
+    if let Some(ref theme) = args.theme {
+        config.theme = match theme.to_lowercase().as_str() {
+            "light"                        => ThemeName::Light,
+            "dracula"                      => ThemeName::Dracula,
+            "gruvbox"                      => ThemeName::Gruvbox,
+            "catppuccin" | "catppuccin_mocha" => ThemeName::CatppuccinMocha,
+            "nord"                         => ThemeName::Nord,
+            "tokyo_night" | "tokyonight"   => ThemeName::TokyoNight,
+            _                              => ThemeName::Dark,
+        };
+    }
+    if args.nerd_glyphs    { config.nerd_glyphs = true; }
+    if args.no_nerd_glyphs { config.nerd_glyphs = false; }
+    if args.ascii          { config.ascii_mode = true; }
+    if std::env::var("NO_COLOR").is_ok() { config.ascii_mode = true; }
+
+    // Auto-enable Nerd Glyphs inside Windows Terminal if not explicitly set.
+    if !args.nerd_glyphs && !args.no_nerd_glyphs && std::env::var("WT_SESSION").is_ok() {
+        config.nerd_glyphs = true;
+    }
 
     app::run(config)
 }
@@ -80,8 +79,6 @@ fn init_logging(level: &str) -> anyhow::Result<()> {
     let log_dir = std::env::temp_dir();
     let file_appender = tracing_appender::rolling::never(&log_dir, "wtop.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-    // Intentionally leak _guard so the logger stays alive for the process lifetime.
     std::mem::forget(_guard);
 
     tracing_subscriber::fmt()

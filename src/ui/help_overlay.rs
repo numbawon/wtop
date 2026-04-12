@@ -27,6 +27,7 @@ const HELP: &[(&str, &str)] = &[
     ("n",              "Toggle Network panel visibility"),
     ("c",              "Toggle Disk I/O columns in process table"),
     ("w",              "Windows Terminal info / Nerd Font"),
+    ("C",              "Config / settings panel"),
     ("q  Ctrl+C",      "Quit"),
 ];
 

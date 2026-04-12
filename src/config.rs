@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 /// Identifies a single column in the process table.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProcessColumnId {
     Pid,
     Name,
@@ -14,7 +16,7 @@ pub enum ProcessColumnId {
 }
 
 /// A column in the process table with its current visibility.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessColumn {
     pub id: ProcessColumnId,
     pub visible: bool,
@@ -43,7 +45,7 @@ pub fn default_process_columns() -> Vec<ProcessColumn> {
 }
 
 /// How the panels are arranged on screen.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LayoutMode {
     /// Auto-select based on terminal width (default).
     Auto,
@@ -62,6 +64,15 @@ impl LayoutMode {
             Self::Compact => Self::Wide,
             Self::Wide    => Self::Stacked,
             Self::Stacked => Self::Auto,
+        }
+    }
+
+    pub fn cycle_back(&self) -> Self {
+        match self {
+            Self::Auto    => Self::Stacked,
+            Self::Compact => Self::Auto,
+            Self::Wide    => Self::Compact,
+            Self::Stacked => Self::Wide,
         }
     }
 
@@ -88,9 +99,8 @@ pub enum GaugeStyle {
     Ascii,
 }
 
-/// Application configuration — defaults used on first run.
-/// Phase 3 will add reading from %APPDATA%\wtop\config.toml.
-#[derive(Clone, Debug)]
+/// Application configuration — persisted to %APPDATA%\wtop\config.toml.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     /// How often collectors refresh data, in milliseconds.
     pub refresh_interval_ms: u64,
@@ -114,7 +124,7 @@ pub struct Config {
     pub ascii_mode: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeName {
     Dark,
     Light,
@@ -129,13 +139,26 @@ impl ThemeName {
     /// Advance to the next theme in the cycle.
     pub fn cycle(&self) -> Self {
         match self {
-            Self::Dark           => Self::Light,
-            Self::Light          => Self::Dracula,
-            Self::Dracula        => Self::Gruvbox,
-            Self::Gruvbox        => Self::CatppuccinMocha,
+            Self::Dark            => Self::Light,
+            Self::Light           => Self::Dracula,
+            Self::Dracula         => Self::Gruvbox,
+            Self::Gruvbox         => Self::CatppuccinMocha,
             Self::CatppuccinMocha => Self::Nord,
-            Self::Nord           => Self::TokyoNight,
-            Self::TokyoNight     => Self::Dark,
+            Self::Nord            => Self::TokyoNight,
+            Self::TokyoNight      => Self::Dark,
+        }
+    }
+
+    /// Step back to the previous theme.
+    pub fn cycle_back(&self) -> Self {
+        match self {
+            Self::Dark            => Self::TokyoNight,
+            Self::Light           => Self::Dark,
+            Self::Dracula         => Self::Light,
+            Self::Gruvbox         => Self::Dracula,
+            Self::CatppuccinMocha => Self::Gruvbox,
+            Self::Nord            => Self::CatppuccinMocha,
+            Self::TokyoNight      => Self::Nord,
         }
     }
 
@@ -165,6 +188,35 @@ impl Default for Config {
             show_network: true,
             process_columns: default_process_columns(),
             ascii_mode: false,
+        }
+    }
+}
+
+impl Config {
+    fn config_path() -> std::path::PathBuf {
+        let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
+        std::path::PathBuf::from(appdata).join("wtop").join("config.toml")
+    }
+
+    /// Load config from disk, falling back to defaults on any error.
+    pub fn load() -> Self {
+        let path = Self::config_path();
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Ok(config) = toml::from_str::<Config>(&text) {
+                return config;
+            }
+        }
+        Self::default()
+    }
+
+    /// Persist config to %APPDATA%\wtop\config.toml. Silently ignores errors.
+    pub fn save(&self) {
+        let path = Self::config_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(text) = toml::to_string_pretty(self) {
+            let _ = std::fs::write(path, text);
         }
     }
 }
