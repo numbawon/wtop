@@ -1,18 +1,212 @@
 use crate::models::disk::DiskSnapshot;
+use windows::Win32::System::Performance::{
+    PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
+    PdhGetFormattedCounterArrayW, PdhOpenQueryW, PDH_FMT_COUNTERVALUE_ITEM_W,
+    PDH_FMT_DOUBLE,
+};
+use windows::core::PCWSTR;
 
-/// Disk I/O collector using Windows PDH (Performance Data Helper).
-/// Full PDH implementation is Phase 2. This stub returns empty data
-/// so Phase 1 compiles and runs without requiring PDH setup.
-pub struct DiskCollector;
+const PDH_MORE_DATA: u32 = 0x800007D2;
+
+/// Disk I/O collector backed by Windows PDH (Performance Data Helper).
+///
+/// PDH rate counters need two `PdhCollectQueryData` calls before they return
+/// meaningful bytes/sec values. We prime the first sample in `new()`, so the
+/// first call to `collect()` already returns valid (though possibly zero for
+/// idle disks) rates.
+pub struct DiskCollector {
+    query: isize,
+    counter_read: isize,
+    counter_write: isize,
+    counter_util: isize,
+    valid: bool,
+}
+
+// PDH handles are not Send by default (Windows raw handles / isize).
+// DiskCollector lives exclusively on its own background thread, so it is
+// safe to mark it Send here.
+unsafe impl Send for DiskCollector {}
 
 impl DiskCollector {
     pub fn new() -> Self {
-        Self
+        let dead = Self {
+            query: 0,
+            counter_read: 0,
+            counter_write: 0,
+            counter_util: 0,
+            valid: false,
+        };
+
+        unsafe {
+            let mut query: isize = 0;
+            if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
+                tracing::warn!("DiskCollector: PdhOpenQueryW failed");
+                return dead;
+            }
+
+            let mut counter_read: isize = 0;
+            let mut counter_write: isize = 0;
+            let mut counter_util: isize = 0;
+
+            if PdhAddEnglishCounterW(
+                query,
+                windows::core::w!(r"\PhysicalDisk(*)\Disk Read Bytes/sec"),
+                0,
+                &mut counter_read,
+            ) != 0
+            {
+                tracing::warn!("DiskCollector: failed to add read counter");
+                PdhCloseQuery(query);
+                return dead;
+            }
+            if PdhAddEnglishCounterW(
+                query,
+                windows::core::w!(r"\PhysicalDisk(*)\Disk Write Bytes/sec"),
+                0,
+                &mut counter_write,
+            ) != 0
+            {
+                tracing::warn!("DiskCollector: failed to add write counter");
+                PdhCloseQuery(query);
+                return dead;
+            }
+            if PdhAddEnglishCounterW(
+                query,
+                windows::core::w!(r"\PhysicalDisk(*)\% Disk Time"),
+                0,
+                &mut counter_util,
+            ) != 0
+            {
+                tracing::warn!("DiskCollector: failed to add utilization counter");
+                PdhCloseQuery(query);
+                return dead;
+            }
+
+            // First collection primes the rate counters. The next call to
+            // collect() will return valid bytes/sec deltas.
+            PdhCollectQueryData(query);
+
+            Self {
+                query,
+                counter_read,
+                counter_write,
+                counter_util,
+                valid: true,
+            }
+        }
     }
 
     pub fn collect(&mut self) -> Vec<DiskSnapshot> {
-        // TODO Phase 2: initialize PDH query with localized counter paths
-        // (PdhLookupPerfIndexByNameW), then PdhCollectQueryData each tick.
-        Vec::new()
+        if !self.valid {
+            return Vec::new();
+        }
+
+        unsafe {
+            if PdhCollectQueryData(self.query) != 0 {
+                return Vec::new();
+            }
+        }
+
+        let reads = self.sample_counter(self.counter_read);
+        let writes = self.sample_counter(self.counter_write);
+        let utils = self.sample_counter(self.counter_util);
+
+        // Merge the three counter arrays by instance name, dropping the
+        // synthetic "_Total" rollup that PDH always includes.
+        let mut result = Vec::new();
+        for (name, read_bps) in &reads {
+            if name == "_Total" {
+                continue;
+            }
+            let write_bps = writes
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| *v)
+                .unwrap_or(0);
+            let util_pct = utils
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| *v as f32)
+                .unwrap_or(0.0)
+                .clamp(0.0, 100.0);
+
+            result.push(DiskSnapshot {
+                device_name: name.clone(),
+                read_bps: *read_bps,
+                write_bps,
+                utilization_pct: util_pct,
+                read_total_bytes: 0,
+                write_total_bytes: 0,
+            });
+        }
+
+        result
+    }
+
+    /// Read all instances of a wildcard PDH counter as `(instance_name, u64_value)`.
+    fn sample_counter(&self, counter: isize) -> Vec<(String, u64)> {
+        unsafe {
+            let mut buf_size: u32 = 0;
+            let mut item_count: u32 = 0;
+
+            // Sizing call: PDH returns PDH_MORE_DATA with the required buffer size.
+            let status = PdhGetFormattedCounterArrayW(
+                counter,
+                PDH_FMT_DOUBLE,
+                &mut buf_size,
+                &mut item_count,
+                None,
+            );
+
+            if item_count == 0 || buf_size == 0 {
+                return Vec::new();
+            }
+            if status != PDH_MORE_DATA && status != 0 {
+                return Vec::new();
+            }
+
+            // Allocate a byte buffer, then reinterpret as an array of items.
+            let mut buf: Vec<u8> = vec![0u8; buf_size as usize];
+            let items_ptr = buf.as_mut_ptr() as *mut PDH_FMT_COUNTERVALUE_ITEM_W;
+
+            let status2 = PdhGetFormattedCounterArrayW(
+                counter,
+                PDH_FMT_DOUBLE,
+                &mut buf_size,
+                &mut item_count,
+                Some(items_ptr),
+            );
+            if status2 != 0 {
+                return Vec::new();
+            }
+
+            let items = std::slice::from_raw_parts(items_ptr, item_count as usize);
+            let mut out = Vec::with_capacity(item_count as usize);
+
+            for item in items {
+                let ptr = item.szName.0;
+                if ptr.is_null() {
+                    continue;
+                }
+                let len = (0usize..).take_while(|&i| *ptr.add(i) != 0).count();
+                let name =
+                    String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
+                // doubleValue is the bytes/sec (or percent for util).
+                let value = item.FmtValue.Anonymous.doubleValue.max(0.0) as u64;
+                out.push((name, value));
+            }
+
+            out
+        }
+    }
+}
+
+impl Drop for DiskCollector {
+    fn drop(&mut self) {
+        if self.valid {
+            unsafe {
+                PdhCloseQuery(self.query);
+            }
+        }
     }
 }

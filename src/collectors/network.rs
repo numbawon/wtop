@@ -94,13 +94,14 @@ impl NetCollector {
                 continue;
             }
 
-            let adapter_name = format!("{{{}}}", unsafe {
-                format!(
-                    "{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
-                    row.InterfaceLuid.Value,
-                    0u32, 0u32, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
-                )
-            });
+            let g = row.InterfaceGuid;
+            let adapter_name = format!(
+                "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+                g.data1, g.data2, g.data3,
+                g.data4[0], g.data4[1],
+                g.data4[2], g.data4[3], g.data4[4],
+                g.data4[5], g.data4[6], g.data4[7]
+            );
 
             // Decode the Description wide string.
             let desc_slice = &row.Description;

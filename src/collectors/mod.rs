@@ -102,8 +102,18 @@ impl CollectorHub {
                 let mut collector =
                     process::ProcessCollector::new(thread_req_rx, thread_res_tx);
                 loop {
-                    let snapshot = collector.collect();
+                    let mut snapshot = collector.collect();
                     if let Ok(mut s) = state.write() {
+                        // Preserve expanded state and cached thread lists across
+                        // refreshes so open rows don't collapse every tick.
+                        for entry in snapshot.iter_mut() {
+                            if let Some(old) = s.iter().find(|p| p.pid == entry.pid) {
+                                entry.expanded = old.expanded;
+                                if !old.threads.is_empty() {
+                                    entry.threads = old.threads.clone();
+                                }
+                            }
+                        }
                         *s = snapshot;
                     }
                     sleep_thread(Duration::from_millis(interval_ms * 2));

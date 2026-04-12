@@ -40,7 +40,7 @@ pub fn render(
             .map(|n| {
                 let up = if n.is_up { "✓" } else { "✗" };
                 Row::new(vec![
-                    Cell::from(truncate(&n.display_name, 18)),
+                    Cell::from(super::truncate(&n.display_name, 18)),
                     Cell::from(ByteSize(n.rx_bps).to_string() + "/s"),
                     Cell::from(ByteSize(n.tx_bps).to_string() + "/s"),
                     Cell::from(up),
@@ -70,10 +70,3 @@ pub fn render(
     frame.render_widget(table, area);
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max - 1])
-    }
-}

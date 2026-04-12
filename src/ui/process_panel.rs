@@ -23,7 +23,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, fo
     let visible: Vec<&ProcessEntry> = processes
         .iter()
         .filter(|p| {
-            if !state.show_system_processes && p.user == "SYSTEM" {
+            if !state.show_system_processes && crate::app::is_system_account(&p.user) {
                 return false;
             }
             if !state.filter_text.is_empty()
@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, fo
             Cell::from(format!("{:>4.1}%", proc.mem_pct)),
             Cell::from(proc.thread_count.to_string()),
             Cell::from(proc.status.to_string()).style(status_style(proc, theme)),
-            Cell::from(truncate(&proc.user, 12)),
+            Cell::from(super::truncate(&proc.user, 12)),
         ];
 
         rows.push(Row::new(cells).style(row_style));
@@ -101,7 +101,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, fo
                     Cell::from(""),
                     Cell::from(format!("cpu:{}ms", thread.cpu_time_ms)),
                     Cell::from(format!("pri:{}", thread.priority)),
-                    Cell::from(truncate(&thread.start_module, 20)),
+                    Cell::from(super::truncate(&thread.start_module, 20)),
                 ];
 
                 rows.push(Row::new(thread_cells).style(thread_style));
@@ -157,11 +157,4 @@ fn status_style(proc: &ProcessEntry, theme: &Theme) -> Style {
     }
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max - 1])
-    }
-}
 

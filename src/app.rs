@@ -8,6 +8,8 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 
 use crate::collectors::CollectorHub;
 use crate::config::Config;
@@ -51,31 +53,41 @@ pub struct AppState {
     pub hub: CollectorHub,
     pub focused_panel: FocusedPanel,
     pub process_cursor: usize,
-    pub process_offset: usize,
     pub sort_state: SortState,
     pub filter_active: bool,
     pub filter_text: String,
     pub show_system_processes: bool,
+    pub user_filter_active: bool,
+    pub current_user: String,
     pub show_help: bool,
     pub show_kill_confirm: bool,
+    /// The (pid, name) of the process targeted for kill while the confirm dialog is open.
+    pub kill_target: Option<(u32, String)>,
+    /// Transient status message shown in the status bar (e.g. kill errors).
+    /// Cleared on the next non-trivial key action.
+    pub status_message: Option<String>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
         let hub = CollectorHub::spawn(&config);
         let show_sys = config.show_system_processes;
+        let current_user = std::env::var("USERNAME").unwrap_or_default();
         Self {
             config,
             hub,
             focused_panel: FocusedPanel::Processes,
             process_cursor: 0,
-            process_offset: 0,
             sort_state: SortState::default(),
             filter_active: false,
             filter_text: String::new(),
             show_system_processes: show_sys,
+            user_filter_active: false,
+            current_user,
             show_help: false,
             show_kill_confirm: false,
+            kill_target: None,
+            status_message: None,
         }
     }
 
@@ -91,6 +103,10 @@ impl AppState {
     }
 
     fn dispatch(&mut self, action: AppAction, visible_count: usize) {
+        // Clear any transient status message on the next meaningful key.
+        if action != AppAction::None {
+            self.status_message = None;
+        }
         match action {
             AppAction::MoveUp => {
                 if self.process_cursor > 0 {
@@ -138,9 +154,41 @@ impl AppState {
             AppAction::CloseFilter => self.filter_active = false,
             AppAction::FilterChar(c) => self.filter_text.push(c),
             AppAction::FilterBackspace => { self.filter_text.pop(); }
-            AppAction::KillProcess => self.show_kill_confirm = true,
+            AppAction::KillProcess => {
+                // Capture the selected process before showing the dialog.
+                if let Ok(procs) = self.hub.processes.read() {
+                    let filtered: Vec<(u32, String)> = procs
+                        .iter()
+                        .filter(|p| self.process_matches(p))
+                        .map(|p| (p.pid, p.name.clone()))
+                        .collect();
+                    if let Some((pid, name)) = filtered.get(self.process_cursor) {
+                        self.kill_target = Some((*pid, name.clone()));
+                        self.show_kill_confirm = true;
+                    }
+                }
+            }
+            AppAction::ConfirmKill => {
+                if let Some((pid, ref name)) = self.kill_target.take() {
+                    if !kill_process(pid) {
+                        self.status_message = Some(format!(
+                            "Kill failed: {} (PID {}) — run as Administrator to kill system processes",
+                            name, pid
+                        ));
+                    }
+                }
+                self.show_kill_confirm = false;
+            }
+            AppAction::CancelKill => {
+                self.kill_target = None;
+                self.show_kill_confirm = false;
+            }
             AppAction::ToggleSystemProcesses => {
                 self.show_system_processes = !self.show_system_processes;
+            }
+            AppAction::ToggleUserFilter => {
+                self.user_filter_active = !self.user_filter_active;
+                self.process_cursor = 0;
             }
             AppAction::ToggleHelp => self.show_help = !self.show_help,
             AppAction::IncreaseRefresh => {
@@ -156,13 +204,44 @@ impl AppState {
     }
 
     fn process_matches(&self, p: &crate::models::process::ProcessEntry) -> bool {
-        if !self.show_system_processes && p.user == "SYSTEM" {
+        if !self.show_system_processes && is_system_account(&p.user) {
+            return false;
+        }
+        if self.user_filter_active
+            && !self.current_user.is_empty()
+            && !p.user.to_lowercase().contains(&self.current_user.to_lowercase())
+        {
             return false;
         }
         if !self.filter_text.is_empty() {
             return p.name.to_lowercase().contains(&self.filter_text.to_lowercase());
         }
         true
+    }
+}
+
+/// Returns true if the user account is a Windows built-in service account.
+pub fn is_system_account(user: &str) -> bool {
+    matches!(
+        user,
+        "SYSTEM" | "LOCAL SERVICE" | "NETWORK SERVICE" | "?"
+    ) || user.starts_with("NT AUTHORITY\\")
+        || user.starts_with("NT SERVICE\\")
+        || user.is_empty()
+}
+
+/// Kill a process by PID using TerminateProcess. Returns true on success.
+fn kill_process(pid: u32) -> bool {
+    // Safety: pid comes from the live process list; we check the handle before use.
+    unsafe {
+        match OpenProcess(PROCESS_TERMINATE, false, pid) {
+            Ok(handle) => {
+                let ok = TerminateProcess(handle, 1).is_ok();
+                let _ = CloseHandle(handle);
+                ok
+            }
+            Err(_) => false,
+        }
     }
 }
 
@@ -221,7 +300,7 @@ fn event_loop(
         // Poll for input.
         if event::poll(tick)? {
             if let Event::Key(key) = event::read()? {
-                let action = handle_key(key, state.filter_active);
+                let action = handle_key(key, state.filter_active, state.show_kill_confirm);
                 if action == AppAction::Quit {
                     return Ok(());
                 }

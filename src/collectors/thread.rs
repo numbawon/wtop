@@ -1,4 +1,5 @@
 use crate::models::thread::{ThreadEntry, ThreadState};
+use std::collections::HashMap;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, THREADENTRY32, TH32CS_SNAPTHREAD,
 };
@@ -8,8 +9,200 @@ use windows::Win32::System::Threading::{
 use windows::Win32::Foundation::{CloseHandle, FILETIME};
 use windows::core::Result as WinResult;
 
-/// Collect all threads for a given PID using CreateToolhelp32Snapshot.
+// ──────────────────────────────────────────────────────────────────────────────
+// NtQuerySystemInformation structures (64-bit layout, verified sizes below)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Minimal view of UNICODE_STRING on 64-bit (16 bytes).
+#[repr(C)]
+struct UnicodeString {
+    length: u16,
+    maximum_length: u16,
+    _pad: u32,
+    buffer: usize,
+}
+
+/// Minimal fixed-size header of SYSTEM_PROCESS_INFORMATION (256 bytes on x64).
+/// The variable-length `Threads[]` array immediately follows in the buffer.
+#[repr(C)]
+struct SysProcInfo {
+    next_entry_offset: u32,
+    number_of_threads: u32,
+    _spare: [i64; 3],
+    _create_time: i64,
+    _user_time: i64,
+    _kernel_time: i64,
+    _image_name: UnicodeString,
+    _base_priority: i32,
+    _pad1: u32,
+    _unique_process_id: usize,
+    _inherited_from: usize,
+    _handle_count: u32,
+    _session_id: u32,
+    _unique_process_key: usize,
+    _peak_virtual_size: usize,
+    _virtual_size: usize,
+    _page_fault_count: u32,
+    _pad2: u32,
+    _peak_ws: usize,
+    _ws: usize,
+    _quota_peak_paged: usize,
+    _quota_paged: usize,
+    _quota_peak_nonpaged: usize,
+    _quota_nonpaged: usize,
+    _pagefile: usize,
+    _peak_pagefile: usize,
+    _private_page_count: usize,
+    _read_ops: i64,
+    _write_ops: i64,
+    _other_ops: i64,
+    _read_bytes: i64,
+    _write_bytes: i64,
+    _other_bytes: i64,
+}
+
+/// SYSTEM_THREAD_INFORMATION (80 bytes on x64).
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct SysThreadInfo {
+    _kernel_time: i64,
+    _user_time: i64,
+    _create_time: i64,
+    _wait_time: u32,
+    _pad: u32,
+    _start_address: usize,
+    _client_pid: usize,
+    client_tid: usize,
+    _priority: i32,
+    _base_priority: i32,
+    _context_switches: u32,
+    thread_state: u32,
+    wait_reason: u32,
+    _pad2: u32,
+}
+
+// Compile-time layout assertions.
+const _: () = assert!(std::mem::size_of::<UnicodeString>() == 16);
+const _: () = assert!(std::mem::size_of::<SysProcInfo>() == 256);
+const _: () = assert!(std::mem::size_of::<SysThreadInfo>() == 80);
+
+type NtQuerySystemInformationFn = unsafe extern "system" fn(
+    u32,
+    *mut std::ffi::c_void,
+    u32,
+    *mut u32,
+) -> i32;
+
+/// Query thread states for all threads system-wide using
+/// NtQuerySystemInformation(SystemProcessInformation=5).
+/// Returns a map of TID → ThreadState.
+fn query_all_thread_states() -> HashMap<u32, ThreadState> {
+    use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    use windows::core::PCSTR;
+
+    let mut map = HashMap::new();
+
+    let ntdll = unsafe { GetModuleHandleW(windows::core::w!("ntdll.dll")).ok() };
+    let ntdll = match ntdll {
+        Some(h) => h,
+        None => return map,
+    };
+
+    let proc_addr = unsafe {
+        GetProcAddress(ntdll, PCSTR(b"NtQuerySystemInformation\0".as_ptr()))
+    };
+    let proc_addr = match proc_addr {
+        Some(p) => p,
+        None => return map,
+    };
+
+    let nt_query: NtQuerySystemInformationFn =
+        unsafe { std::mem::transmute(proc_addr) };
+
+    // SystemProcessInformation = 5.
+    // Start with 4 MiB; retry with larger buffer if STATUS_INFO_LENGTH_MISMATCH.
+    let mut buf_len: u32 = 4 * 1024 * 1024;
+    let status_info_length_mismatch: i32 = 0xC0000004u32 as i32;
+
+    loop {
+        let mut buf: Vec<u8> = vec![0u8; buf_len as usize];
+        let mut returned: u32 = 0;
+        let status = unsafe {
+            nt_query(5, buf.as_mut_ptr() as _, buf_len, &mut returned)
+        };
+
+        if status == status_info_length_mismatch {
+            buf_len = returned.max(buf_len * 2);
+            if buf_len > 64 * 1024 * 1024 {
+                break; // give up
+            }
+            continue;
+        }
+        if status != 0 {
+            break;
+        }
+
+        // Walk the linked list of SYSTEM_PROCESS_INFORMATION entries.
+        let mut offset: usize = 0;
+        loop {
+            if offset + std::mem::size_of::<SysProcInfo>() > buf.len() {
+                break;
+            }
+
+            let proc_ptr = unsafe {
+                &*(buf.as_ptr().add(offset) as *const SysProcInfo)
+            };
+
+            let thread_count = proc_ptr.number_of_threads as usize;
+            let thread_base = offset + std::mem::size_of::<SysProcInfo>();
+            let thread_size = std::mem::size_of::<SysThreadInfo>();
+
+            for t in 0..thread_count {
+                let t_offset = thread_base + t * thread_size;
+                if t_offset + thread_size > buf.len() {
+                    break;
+                }
+                let t_info = unsafe {
+                    &*(buf.as_ptr().add(t_offset) as *const SysThreadInfo)
+                };
+
+                let tid = t_info.client_tid as u32;
+                let state = map_thread_state(t_info.thread_state, t_info.wait_reason);
+                map.insert(tid, state);
+            }
+
+            if proc_ptr.next_entry_offset == 0 {
+                break;
+            }
+            offset += proc_ptr.next_entry_offset as usize;
+        }
+        break;
+    }
+
+    map
+}
+
+fn map_thread_state(state: u32, wait_reason: u32) -> ThreadState {
+    match state {
+        2 => ThreadState::Running,
+        4 => ThreadState::Terminated,
+        5 if wait_reason == 5 => ThreadState::Suspended, // WaitReason::Suspended
+        5 => ThreadState::Waiting,
+        1 | 3 | 6 | 7 => ThreadState::Waiting, // Ready / Standby / Transition / DeferredReady
+        _ => ThreadState::Unknown,
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Public thread collection (called on demand when user expands a process row)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Collect all threads for a given PID using CreateToolhelp32Snapshot,
+/// enriching each entry with real thread state from NtQuerySystemInformation.
 pub fn collect_threads(pid: u32) -> Vec<ThreadEntry> {
+    // Get thread states for all threads in one syscall before taking the snapshot.
+    let states = query_all_thread_states();
+
     let mut entries = Vec::new();
 
     let snapshot = unsafe {
@@ -35,7 +228,7 @@ pub fn collect_threads(pid: u32) -> Vec<ThreadEntry> {
 
     loop {
         if te.th32OwnerProcessID == pid {
-            let entry = build_thread_entry(&te, pid);
+            let entry = build_thread_entry(&te, pid, &states);
             entries.push(entry);
         }
 
@@ -49,17 +242,21 @@ pub fn collect_threads(pid: u32) -> Vec<ThreadEntry> {
     entries
 }
 
-fn build_thread_entry(te: &THREADENTRY32, pid: u32) -> ThreadEntry {
+fn build_thread_entry(
+    te: &THREADENTRY32,
+    pid: u32,
+    states: &HashMap<u32, ThreadState>,
+) -> ThreadEntry {
     let tid = te.th32ThreadID;
     let priority = te.tpBasePri as i32;
 
     let (cpu_time_ms, start_address, start_module, suspicious) =
-        query_thread_details(tid).unwrap_or((0, 0, "?".into(), false));
+        query_thread_details(tid, pid).unwrap_or((0, 0, "?".into(), false));
 
-    // Map sysinfo thread state — we don't have the waiting state from Toolhelp,
-    // so we use the thread's kernel state field (tpDeltaPri as a heuristic).
-    // A full state requires NtQuerySystemInformation which we defer to Phase 2.
-    let state = ThreadState::Unknown;
+    let state = states
+        .get(&tid)
+        .copied()
+        .unwrap_or(ThreadState::Unknown);
 
     ThreadEntry {
         tid,
@@ -73,15 +270,12 @@ fn build_thread_entry(te: &THREADENTRY32, pid: u32) -> ThreadEntry {
     }
 }
 
-fn query_thread_details(tid: u32) -> WinResult<(u64, u64, String, bool)> {
-    // Safety: tid is a valid thread ID from the snapshot.
+fn query_thread_details(tid: u32, pid: u32) -> WinResult<(u64, u64, String, bool)> {
     let handle = unsafe { OpenThread(THREAD_QUERY_INFORMATION, false, tid)? };
 
     let cpu_time_ms = get_thread_cpu_time(handle).unwrap_or(0);
-
-    // Resolve start address via NtQueryInformationThread (loaded dynamically).
     let start_address = get_thread_start_address(handle).unwrap_or(0);
-    let (start_module, suspicious) = resolve_module(handle, start_address);
+    let (start_module, suspicious) = resolve_module(pid, start_address);
 
     unsafe { let _ = CloseHandle(handle); }
 
@@ -94,34 +288,27 @@ fn get_thread_cpu_time(handle: windows::Win32::Foundation::HANDLE) -> Option<u64
     let mut kernel = FILETIME::default();
     let mut user = FILETIME::default();
 
-    // Safety: handle is valid; all pointers point to valid FILETIME structs.
     unsafe {
         GetThreadTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user).ok()?;
     }
 
-    let kernel_ms = filetime_to_ms(&kernel);
-    let user_ms = filetime_to_ms(&user);
-    Some(kernel_ms + user_ms)
+    Some(filetime_to_ms(&kernel) + filetime_to_ms(&user))
 }
 
 fn filetime_to_ms(ft: &FILETIME) -> u64 {
     let ticks = ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64;
-    ticks / 10_000 // 100-nanosecond intervals → milliseconds
+    ticks / 10_000
 }
 
 fn get_thread_start_address(handle: windows::Win32::Foundation::HANDLE) -> Option<u64> {
     use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
     use windows::core::PCSTR;
 
-    // Load NtQueryInformationThread dynamically — it's undocumented.
     let ntdll = unsafe { GetModuleHandleW(windows::core::w!("ntdll.dll")).ok()? };
-
-    // SAFETY: "NtQueryInformationThread\0" is a valid null-terminated C string.
     let proc_addr = unsafe {
         GetProcAddress(ntdll, PCSTR(b"NtQueryInformationThread\0".as_ptr()))
     }?;
 
-    // Signature: NtQueryInformationThread(HANDLE, THREADINFOCLASS, PVOID, ULONG, PULONG)
     type NtQueryInformationThreadFn = unsafe extern "system" fn(
         windows::Win32::Foundation::HANDLE,
         u32,
@@ -130,7 +317,8 @@ fn get_thread_start_address(handle: windows::Win32::Foundation::HANDLE) -> Optio
         *mut u32,
     ) -> i32;
 
-    let nt_query: NtQueryInformationThreadFn = unsafe { std::mem::transmute(proc_addr) };
+    let nt_query: NtQueryInformationThreadFn =
+        unsafe { std::mem::transmute(proc_addr) };
 
     let mut start_address: u64 = 0;
     let mut ret_len: u32 = 0;
@@ -146,20 +334,106 @@ fn get_thread_start_address(handle: windows::Win32::Foundation::HANDLE) -> Optio
         )
     };
 
-    if status == 0 {
-        Some(start_address)
-    } else {
-        None
-    }
+    if status == 0 { Some(start_address) } else { None }
 }
 
-fn resolve_module(
-    handle: windows::Win32::Foundation::HANDLE,
-    _start_address: u64,
-) -> (String, bool) {
-    // Phase 2 will implement full module enumeration via EnumProcessModules
-    // and compare start_address against loaded module ranges.
-    // For Phase 1, return a placeholder.
-    let _ = handle;
-    ("?".into(), false)
+fn resolve_module(pid: u32, start_address: u64) -> (String, bool) {
+    use windows::Win32::System::ProcessStatus::{
+        EnumProcessModules, GetModuleFileNameExW, GetModuleInformation, MODULEINFO,
+    };
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    };
+
+    if start_address == 0 {
+        return ("?".into(), false);
+    }
+
+    let proc = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+            false,
+            pid,
+        )
+        .ok()
+    };
+    let proc = match proc {
+        Some(h) => h,
+        None => return ("?".into(), false),
+    };
+
+    let mut modules: Vec<windows::Win32::Foundation::HMODULE> =
+        vec![windows::Win32::Foundation::HMODULE::default(); 512];
+    let mut needed: u32 = 0;
+
+    let ok = unsafe {
+        EnumProcessModules(
+            proc,
+            modules.as_mut_ptr(),
+            (modules.len() * std::mem::size_of::<windows::Win32::Foundation::HMODULE>())
+                as u32,
+            &mut needed,
+        )
+        .is_ok()
+    };
+
+    if !ok {
+        unsafe { let _ = CloseHandle(proc); }
+        return ("?".into(), false);
+    }
+
+    let module_count = (needed as usize
+        / std::mem::size_of::<windows::Win32::Foundation::HMODULE>())
+    .min(modules.len());
+
+    let mut matched_name = String::from("?");
+    let mut found = false;
+
+    for &module in &modules[..module_count] {
+        let mut info = MODULEINFO {
+            lpBaseOfDll: std::ptr::null_mut(),
+            SizeOfImage: 0,
+            EntryPoint: std::ptr::null_mut(),
+        };
+
+        let ok_info = unsafe {
+            GetModuleInformation(
+                proc,
+                module,
+                &mut info,
+                std::mem::size_of::<MODULEINFO>() as u32,
+            )
+            .is_ok()
+        };
+        if !ok_info {
+            continue;
+        }
+
+        let base = info.lpBaseOfDll as u64;
+        let end = base + info.SizeOfImage as u64;
+
+        if start_address >= base && start_address < end {
+            // start_address is within this module.
+            let mut name_buf = [0u16; 260];
+            let len = unsafe {
+                GetModuleFileNameExW(proc, module, &mut name_buf) as usize
+            };
+            if len > 0 {
+                let full_path = String::from_utf16_lossy(&name_buf[..len]);
+                // Keep only the filename part (e.g. "ntdll.dll").
+                matched_name = full_path
+                    .rsplit(['\\', '/'])
+                    .next()
+                    .unwrap_or(&full_path)
+                    .to_string();
+            }
+            found = true;
+            break;
+        }
+    }
+
+    unsafe { let _ = CloseHandle(proc); }
+
+    // If the start address doesn't fall inside any loaded module it's suspicious.
+    (matched_name, !found)
 }

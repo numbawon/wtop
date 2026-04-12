@@ -21,6 +21,8 @@ pub enum AppAction {
     FilterChar(char),
     FilterBackspace,
     KillProcess,
+    ConfirmKill,
+    CancelKill,
     ToggleSystemProcesses,
     ToggleUserFilter,
     IncreaseRefresh,
@@ -30,7 +32,16 @@ pub enum AppAction {
 }
 
 /// Map a crossterm KeyEvent to an AppAction.
-pub fn handle_key(key: KeyEvent, filter_active: bool) -> AppAction {
+pub fn handle_key(key: KeyEvent, filter_active: bool, kill_confirm_active: bool) -> AppAction {
+    // When the kill confirm dialog is open, only allow confirm or cancel.
+    if kill_confirm_active {
+        return match key.code {
+            KeyCode::Enter => AppAction::ConfirmKill,
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => AppAction::CancelKill,
+            _ => AppAction::None,
+        };
+    }
+
     // When the filter bar is open, most keys feed into the search string.
     if filter_active {
         return match key.code {

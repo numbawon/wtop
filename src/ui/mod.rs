@@ -2,6 +2,7 @@ pub mod cpu_panel;
 pub mod disk_panel;
 pub mod filter_bar;
 pub mod help_overlay;
+pub mod kill_confirm;
 pub mod layout;
 pub mod memory_panel;
 pub mod network_panel;
@@ -86,6 +87,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     if state.show_help {
         help_overlay::render(frame, area, &theme);
     }
+
+    if state.show_kill_confirm {
+        if let Some((pid, ref name)) = state.kill_target {
+            kill_confirm::render(frame, area, pid, name, &theme);
+        }
+    }
 }
 
 fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
@@ -94,7 +101,25 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
 
     if state.filter_active || !state.filter_text.is_empty() {
         filter_bar::render(frame, area, &state.filter_text, state.filter_active, theme);
-    } else {
+        return;
+    }
+
+    if let Some(ref msg) = state.status_message {
+        let line = Line::from(vec![
+            Span::styled("  ✗ ", theme.gauge_high),
+            Span::styled(msg.as_str(), theme.text_normal),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
+    {
+        let user_filter_span = if state.user_filter_active {
+            Span::styled(" [u:UserFilter] ", theme.filter_active)
+        } else {
+            Span::styled("", theme.text_dim)
+        };
+
         let line = Line::from(vec![
             Span::styled("q", theme.text_bright),
             Span::styled(":Quit  ", theme.text_dim),
@@ -106,13 +131,28 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
             Span::styled(":Expand  ", theme.text_dim),
             Span::styled("f", theme.text_bright),
             Span::styled(":Filter  ", theme.text_dim),
-            Span::styled("k", theme.text_bright),
+            Span::styled("K", theme.text_bright),
             Span::styled(":Kill  ", theme.text_dim),
+            Span::styled("u", theme.text_bright),
+            Span::styled(":UserFilter  ", theme.text_dim),
+            user_filter_span,
             Span::styled(&refresh, theme.text_dim),
             Span::styled("  ", theme.text_dim),
             Span::styled(&now, theme.text_dim),
         ]);
         let para = Paragraph::new(line);
         frame.render_widget(para, area);
+    }
+}
+
+/// Truncate a string to at most `max_chars` visible characters.
+/// Appends `…` when truncation occurs. Safe for multi-byte Unicode.
+pub fn truncate(s: &str, max_chars: usize) -> String {
+    let mut chars = s.chars();
+    let out: String = chars.by_ref().take(max_chars.saturating_sub(1)).collect();
+    if chars.next().is_some() {
+        format!("{}…", out)
+    } else {
+        s.to_string()
     }
 }
