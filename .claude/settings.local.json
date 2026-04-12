@@ -3,7 +3,10 @@
     "allow": [
       "Bash(git -C c:/Users/NumbaWon/.git/wtop log --oneline -10)",
       "Bash(git -C c:/Users/NumbaWon/.git/wtop show 4d1c365 --stat)",
-      "Bash(git -C c:/Users/NumbaWon/.git/wtop show 4d1c365 --no-patch --format=\"%B\")"
+      "Bash(git -C c:/Users/NumbaWon/.git/wtop show 4d1c365 --no-patch --format=\"%B\")",
+      "Read(//c/Users/NumbaWon/.ssh/**)",
+      "Bash(ssh -T git@github.com)",
+      "Bash(ssh-add -l)"
     ]
   }
 }
