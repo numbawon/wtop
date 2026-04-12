@@ -3,15 +3,25 @@ use crate::models::thread::ThreadEntry;
 use sysinfo::{ProcessStatus as SysProcessStatus, System};
 use std::collections::HashMap;
 use std::sync::mpsc;
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Security::{
+    GetTokenInformation, LookupAccountSidW, SID_NAME_USE,
+    TokenUser, TOKEN_QUERY, TOKEN_USER,
+};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, THREADENTRY32, TH32CS_SNAPTHREAD,
 };
+use windows::Win32::System::Threading::{
+    OpenProcess, OpenProcessToken, PROCESS_QUERY_INFORMATION,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::core::PWSTR;
 
 pub struct ProcessCollector {
     sys: System,
     pub thread_request_rx: mpsc::Receiver<u32>,
     pub thread_result_tx: mpsc::Sender<(u32, Vec<ThreadEntry>)>,
+    user_cache: HashMap<u32, String>,
 }
 
 impl ProcessCollector {
@@ -21,7 +31,7 @@ impl ProcessCollector {
     ) -> Self {
         let mut sys = System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        Self { sys, thread_request_rx, thread_result_tx }
+        Self { sys, thread_request_rx, thread_result_tx, user_cache: HashMap::new() }
     }
 
     pub fn collect(&mut self) -> Vec<ProcessEntry> {
@@ -43,10 +53,7 @@ impl ProcessCollector {
                     cpu_pct: p.cpu_usage(),
                     mem_bytes: mem,
                     mem_pct: mem as f32 / total_memory as f32 * 100.0,
-                    user: p
-                        .user_id()
-                        .map(|u| u.to_string())
-                        .unwrap_or_else(|| "?".into()),
+                    user: self.user_cache.entry(pid).or_insert_with(|| resolve_process_user(pid)).clone(),
                     status: map_status(p.status()),
                     thread_count: *thread_counts.get(&pid).unwrap_or(&0),
                     disk_read_bps: p.disk_usage().read_bytes,
@@ -56,6 +63,10 @@ impl ProcessCollector {
                 }
             })
             .collect();
+
+        // Evict cache entries for PIDs that no longer exist.
+        let live_pids: std::collections::HashSet<u32> = entries.iter().map(|e| e.pid).collect();
+        self.user_cache.retain(|pid, _| live_pids.contains(pid));
 
         // Handle any pending thread expansion requests.
         while let Ok(pid) = self.thread_request_rx.try_recv() {
@@ -95,6 +106,78 @@ fn count_threads_by_pid() -> HashMap<u32, u32> {
 
     unsafe { let _ = CloseHandle(snapshot); }
     counts
+}
+
+/// Resolve the owner username for a process via OpenProcessToken + LookupAccountSidW.
+/// Falls back to "?" for kernel processes or those that deny access.
+fn resolve_process_user(pid: u32) -> String {
+    // PID 0 (Idle) and PID 4 (System) are kernel entities with no accessible token.
+    if pid == 0 || pid == 4 {
+        return "SYSTEM".into();
+    }
+    unsafe { win32_process_user(pid) }.unwrap_or_else(|| "?".into())
+}
+
+unsafe fn win32_process_user(pid: u32) -> Option<String> {
+    // Try full query rights first; fall back to limited (works on more processes on Win10/11).
+    let proc = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid)
+        .or_else(|_| OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid))
+        .ok()?;
+
+    let mut token = HANDLE::default();
+    if OpenProcessToken(proc, TOKEN_QUERY, &mut token).is_err() {
+        let _ = CloseHandle(proc);
+        return None;
+    }
+    let _ = CloseHandle(proc);
+
+    // First call: get required buffer size.
+    let mut needed: u32 = 0;
+    let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+    if needed == 0 {
+        let _ = CloseHandle(token);
+        return None;
+    }
+
+    let mut buf: Vec<u8> = vec![0u8; needed as usize];
+    if GetTokenInformation(
+        token,
+        TokenUser,
+        Some(buf.as_mut_ptr() as *mut _),
+        needed,
+        &mut needed,
+    )
+    .is_err()
+    {
+        let _ = CloseHandle(token);
+        return None;
+    }
+    let _ = CloseHandle(token);
+
+    // Extract the SID from TOKEN_USER.
+    let token_user = &*(buf.as_ptr() as *const TOKEN_USER);
+    let sid = token_user.User.Sid;
+
+    // Resolve SID → account name.
+    let mut name_buf = [0u16; 256];
+    let mut domain_buf = [0u16; 256];
+    let mut name_len = 256u32;
+    let mut domain_len = 256u32;
+    let mut sid_type = SID_NAME_USE(0);
+
+    LookupAccountSidW(
+        None,
+        sid,
+        PWSTR(name_buf.as_mut_ptr()),
+        &mut name_len,
+        PWSTR(domain_buf.as_mut_ptr()),
+        &mut domain_len,
+        &mut sid_type,
+    )
+    .ok()?;
+
+    let name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+    if name.is_empty() { None } else { Some(name) }
 }
 
 fn map_status(status: SysProcessStatus) -> ProcessStatus {

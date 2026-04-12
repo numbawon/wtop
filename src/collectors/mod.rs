@@ -5,6 +5,7 @@ pub mod network;
 pub mod process;
 pub mod thread;
 
+use std::collections::HashMap;
 use crate::config::Config;
 use crate::models::{
     cpu::CpuSnapshot,
@@ -103,19 +104,35 @@ impl CollectorHub {
                     process::ProcessCollector::new(thread_req_rx, thread_res_tx);
                 loop {
                     let mut snapshot = collector.collect();
-                    if let Ok(mut s) = state.write() {
-                        // Preserve expanded state and cached thread lists across
-                        // refreshes so open rows don't collapse every tick.
-                        for entry in snapshot.iter_mut() {
-                            if let Some(old) = s.iter().find(|p| p.pid == entry.pid) {
-                                entry.expanded = old.expanded;
-                                if !old.threads.is_empty() {
-                                    entry.threads = old.threads.clone();
-                                }
+
+                    // Build a preservation map (pid → (expanded, threads)) using a
+                    // read lock — cheaper and shorter-held than a write lock.
+                    let mut preserve: HashMap<u32, (bool, Vec<ThreadEntry>)> = {
+                        if let Ok(s) = state.read() {
+                            s.iter()
+                                .filter(|p| p.expanded || !p.threads.is_empty())
+                                .map(|p| (p.pid, (p.expanded, p.threads.clone())))
+                                .collect()
+                        } else {
+                            HashMap::new()
+                        }
+                    };
+
+                    // Merge preserved state into the new snapshot.
+                    for entry in snapshot.iter_mut() {
+                        if let Some((expanded, threads)) = preserve.remove(&entry.pid) {
+                            entry.expanded = expanded;
+                            if !threads.is_empty() {
+                                entry.threads = threads; // move, not clone
                             }
                         }
+                    }
+
+                    // Write lock only for the swap — minimal critical section.
+                    if let Ok(mut s) = state.write() {
                         *s = snapshot;
                     }
+
                     sleep_thread(Duration::from_millis(interval_ms * 2));
                 }
             });

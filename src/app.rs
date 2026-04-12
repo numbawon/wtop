@@ -1,7 +1,7 @@
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -9,12 +9,18 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+use windows::Win32::System::Threading::{OpenProcess, OpenProcessToken, TerminateProcess, PROCESS_TERMINATE};
 
 use crate::collectors::CollectorHub;
-use crate::config::Config;
+use crate::config::{Config, ProcessColumnId};
+use windows::Win32::Security::{
+    AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES,
+    SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+};
+use windows::Win32::System::Threading::GetCurrentProcess;
 use crate::input::handler::{handle_key, AppAction};
 use crate::models::process::{sort_processes, SortState};
+use crate::wt::WtInfo;
 
 /// Which panel has keyboard focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +72,12 @@ pub struct AppState {
     /// Transient status message shown in the status bar (e.g. kill errors).
     /// Cleared on the next non-trivial key action.
     pub status_message: Option<String>,
+    /// Windows Terminal environment info, resolved once at startup.
+    pub wt_info: WtInfo,
+    /// Whether the Windows Terminal info panel overlay is visible.
+    pub show_wt_panel: bool,
+    /// Whether the "apply Nerd Font" confirmation sub-dialog is active.
+    pub wt_nerd_font_confirm: bool,
 }
 
 impl AppState {
@@ -88,6 +100,9 @@ impl AppState {
             show_kill_confirm: false,
             kill_target: None,
             status_message: None,
+            wt_info: WtInfo::detect(),
+            show_wt_panel: false,
+            wt_nerd_font_confirm: false,
         }
     }
 
@@ -191,6 +206,83 @@ impl AppState {
                 self.process_cursor = 0;
             }
             AppAction::ToggleHelp => self.show_help = !self.show_help,
+            AppAction::ToggleNerdGlyphs => self.config.nerd_glyphs = !self.config.nerd_glyphs,
+            AppAction::CycleTheme => {
+                self.config.theme = self.config.theme.cycle();
+                self.status_message = Some(format!("Theme: {}", self.config.theme.label()));
+            }
+            AppAction::CycleLayout => {
+                self.config.layout_mode = self.config.layout_mode.cycle();
+                self.status_message = Some(format!("Layout: {}", self.config.layout_mode.label()));
+            }
+            AppAction::ToggleDisk => {
+                self.config.show_disk = !self.config.show_disk;
+                if !self.config.show_disk && self.focused_panel == FocusedPanel::Disk {
+                    self.focused_panel = FocusedPanel::Processes;
+                }
+                self.status_message = Some(if self.config.show_disk {
+                    "Disk panel: shown".to_string()
+                } else {
+                    "Disk panel: hidden".to_string()
+                });
+            }
+            AppAction::ToggleNetwork => {
+                self.config.show_network = !self.config.show_network;
+                if !self.config.show_network && self.focused_panel == FocusedPanel::Network {
+                    self.focused_panel = FocusedPanel::Processes;
+                }
+                self.status_message = Some(if self.config.show_network {
+                    "Network panel: shown".to_string()
+                } else {
+                    "Network panel: hidden".to_string()
+                });
+            }
+            AppAction::ToggleDiskColumns => {
+                let currently_shown = self.config.process_columns
+                    .iter()
+                    .any(|c| c.id == ProcessColumnId::DiskRead && c.visible);
+                for col in self.config.process_columns.iter_mut() {
+                    if col.id == ProcessColumnId::DiskRead || col.id == ProcessColumnId::DiskWrite {
+                        col.visible = !currently_shown;
+                    }
+                }
+                self.status_message = Some(if !currently_shown {
+                    "Disk I/O columns: shown".to_string()
+                } else {
+                    "Disk I/O columns: hidden".to_string()
+                });
+            }
+            AppAction::ToggleWtPanel => {
+                self.show_wt_panel = !self.show_wt_panel;
+                self.wt_nerd_font_confirm = false;
+            }
+            AppAction::WtConfirmNerdFont => {
+                if self.show_wt_panel && self.wt_info.detected {
+                    self.wt_nerd_font_confirm = true;
+                }
+            }
+            AppAction::WtApplyNerdFont => {
+                self.wt_nerd_font_confirm = false;
+                match self.wt_info.apply_nerd_font() {
+                    Ok(()) => {
+                        // Refresh font_face in our snapshot so the panel shows the new font.
+                        self.wt_info.font_face =
+                            Some(crate::wt::NERD_FONT_FACE.to_string());
+                        self.status_message = Some(format!(
+                            "Applied \"{}\". Restart Windows Terminal to see the change.",
+                            crate::wt::NERD_FONT_FACE
+                        ));
+                        self.show_wt_panel = false;
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Font apply failed: {e}"));
+                        self.show_wt_panel = false;
+                    }
+                }
+            }
+            AppAction::WtCancelNerdFont => {
+                self.wt_nerd_font_confirm = false;
+            }
             AppAction::IncreaseRefresh => {
                 self.config.refresh_interval_ms =
                     (self.config.refresh_interval_ms + 250).min(5000);
@@ -203,7 +295,7 @@ impl AppState {
         }
     }
 
-    fn process_matches(&self, p: &crate::models::process::ProcessEntry) -> bool {
+    pub fn process_matches(&self, p: &crate::models::process::ProcessEntry) -> bool {
         if !self.show_system_processes && is_system_account(&p.user) {
             return false;
         }
@@ -245,8 +337,45 @@ fn kill_process(pid: u32) -> bool {
     }
 }
 
+/// Attempt to enable SeDebugPrivilege for the current process.
+/// This allows opening handles to more processes (same as Task Manager / Process Explorer).
+/// Silently does nothing if already enabled or if the process isn't running as admin.
+fn enable_debug_privilege() {
+    use windows::Win32::Foundation::LUID;
+
+    unsafe {
+        let mut token = windows::Win32::Foundation::HANDLE::default();
+        if OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut token,
+        )
+        .is_err()
+        {
+            return;
+        }
+
+        let mut luid = LUID::default();
+        if LookupPrivilegeValueW(None, windows::core::w!("SeDebugPrivilege"), &mut luid).is_err() {
+            let _ = CloseHandle(token);
+            return;
+        }
+
+        let tp = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        let _ = AdjustTokenPrivileges(token, false, Some(&tp), 0, None, None);
+        let _ = CloseHandle(token);
+    }
+}
+
 /// Run the application: set up the terminal, enter the event loop, restore on exit.
 pub fn run(config: Config) -> anyhow::Result<()> {
+    enable_debug_privilege();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -300,7 +429,18 @@ fn event_loop(
         // Poll for input.
         if event::poll(tick)? {
             if let Event::Key(key) = event::read()? {
-                let action = handle_key(key, state.filter_active, state.show_kill_confirm);
+                // On Windows, crossterm fires both Press and Release events.
+                // Only act on Press to prevent every key from registering twice.
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                let action = handle_key(
+                    key,
+                    state.filter_active,
+                    state.show_kill_confirm,
+                    state.show_wt_panel,
+                    state.wt_nerd_font_confirm,
+                );
                 if action == AppAction::Quit {
                     return Ok(());
                 }

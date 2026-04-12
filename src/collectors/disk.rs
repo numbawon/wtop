@@ -192,7 +192,10 @@ impl DiskCollector {
                 let name =
                     String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
                 // doubleValue is the bytes/sec (or percent for util).
-                let value = item.FmtValue.Anonymous.doubleValue.max(0.0) as u64;
+                // Clamp before cast: casting f64 > u64::MAX is UB in Rust.
+                let value = item.FmtValue.Anonymous.doubleValue
+                    .max(0.0)
+                    .min(u64::MAX as f64) as u64;
                 out.push((name, value));
             }
 

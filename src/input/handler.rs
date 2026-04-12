@@ -28,16 +28,51 @@ pub enum AppAction {
     IncreaseRefresh,
     DecreaseRefresh,
     ToggleHelp,
+    ToggleNerdGlyphs,
+    CycleTheme,
+    CycleLayout,
+    ToggleDisk,
+    ToggleNetwork,
+    ToggleDiskColumns,
+    ToggleWtPanel,
+    WtConfirmNerdFont,
+    WtApplyNerdFont,
+    WtCancelNerdFont,
     None,
 }
 
 /// Map a crossterm KeyEvent to an AppAction.
-pub fn handle_key(key: KeyEvent, filter_active: bool, kill_confirm_active: bool) -> AppAction {
+pub fn handle_key(
+    key: KeyEvent,
+    filter_active: bool,
+    kill_confirm_active: bool,
+    wt_panel_active: bool,
+    wt_nerd_font_confirm_active: bool,
+) -> AppAction {
     // When the kill confirm dialog is open, only allow confirm or cancel.
     if kill_confirm_active {
         return match key.code {
             KeyCode::Enter => AppAction::ConfirmKill,
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => AppAction::CancelKill,
+            _ => AppAction::None,
+        };
+    }
+
+    // When the Nerd Font confirmation sub-dialog is active.
+    if wt_nerd_font_confirm_active {
+        return match key.code {
+            KeyCode::Enter => AppAction::WtApplyNerdFont,
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => AppAction::WtCancelNerdFont,
+            _ => AppAction::None,
+        };
+    }
+
+    // When the WT info panel is open, only panel-specific keys work.
+    if wt_panel_active {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => AppAction::ToggleWtPanel,
+            KeyCode::Char('w') | KeyCode::Char('W') => AppAction::ToggleWtPanel,
+            KeyCode::Char('f') | KeyCode::Char('F') => AppAction::WtConfirmNerdFont,
             _ => AppAction::None,
         };
     }
@@ -77,6 +112,13 @@ pub fn handle_key(key: KeyEvent, filter_active: bool, kill_confirm_active: bool)
         (_, KeyCode::Char('+')) => AppAction::IncreaseRefresh,
         (_, KeyCode::Char('-')) => AppAction::DecreaseRefresh,
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => AppAction::ToggleHelp,
+        (_, KeyCode::Char('g')) => AppAction::ToggleNerdGlyphs,
+        (KeyModifiers::SHIFT, KeyCode::Char('T')) => AppAction::CycleTheme,
+        (KeyModifiers::SHIFT, KeyCode::Char('L')) => AppAction::CycleLayout,
+        (_, KeyCode::Char('d')) => AppAction::ToggleDisk,
+        (_, KeyCode::Char('n')) => AppAction::ToggleNetwork,
+        (_, KeyCode::Char('c')) => AppAction::ToggleDiskColumns,
+        (_, KeyCode::Char('w')) => AppAction::ToggleWtPanel,
         _ => AppAction::None,
     }
 }

@@ -1,21 +1,32 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    text::Span,
-    widgets::{Block, Borders, Gauge, Sparkline},
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
+use crate::glyphs::Glyphs;
 use crate::models::cpu::CpuSnapshot;
+use crate::ui::gauge_bar;
 use crate::ui::theme::Theme;
 
-pub fn render(frame: &mut Frame, area: Rect, snapshot: &CpuSnapshot, theme: &Theme, focused: bool) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    snapshot: &CpuSnapshot,
+    theme: &Theme,
+    glyphs: &Glyphs,
+    focused: bool,
+) {
     let border_style = if focused { theme.border_focused } else { theme.border };
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_set(theme.border_set.clone())
         .border_style(border_style)
         .title(Span::styled(
-            format!(" CPU — {} ", snapshot.brand),
+            format!(" {}CPU — {} ", glyphs.cpu_icon, snapshot.brand),
             theme.title,
         ));
 
@@ -43,7 +54,7 @@ pub fn render(frame: &mut Frame, area: Rect, snapshot: &CpuSnapshot, theme: &The
     let bars_area = splits[0];
     let spark_area = splits[1];
 
-    render_core_bars(frame, bars_area, snapshot, theme);
+    render_core_bars(frame, bars_area, snapshot, theme, glyphs);
     render_sparkline(frame, spark_area, snapshot, theme);
 }
 
@@ -52,7 +63,9 @@ fn render_core_bars(
     area: Rect,
     snapshot: &CpuSnapshot,
     theme: &Theme,
+    glyphs: &Glyphs,
 ) {
+    let _ = glyphs; // reserved for future per-core glyph decorations
     let core_count = snapshot.cores.len();
     if core_count == 0 || area.height == 0 {
         return;
@@ -87,15 +100,16 @@ fn render_core_bars(
 
         for (col_i, core) in snapshot.cores[start..end].iter().enumerate() {
             let pct = core.usage_pct as f64;
-            let gauge = Gauge::default()
-                .gauge_style(theme.gauge_for_pct(pct))
-                .label(format!(
-                    "[{:>2}] {:>5.1}%",
-                    core.index, core.usage_pct
-                ))
-                .ratio((pct / 100.0).clamp(0.0, 1.0));
-
-            frame.render_widget(gauge, col_rects[col_i]);
+            let label = format!("[{:>2}] {:>5.1}%", core.index, core.usage_pct);
+            gauge_bar::render_bar(
+                frame,
+                col_rects[col_i],
+                &label,
+                pct / 100.0,
+                theme.gauge_for_pct(pct),
+                theme.text_normal,
+                &theme.gauge_style,
+            );
         }
     }
 }
@@ -109,14 +123,29 @@ fn render_sparkline(
     let data = snapshot.aggregate_history.as_u64_vec();
     let label = format!("Aggregate {:>5.1}%", snapshot.aggregate_pct);
 
-    let spark = Sparkline::default()
-        .data(&data)
-        .style(theme.sparkline)
-        .block(
-            Block::default()
-                .title(Span::styled(label, theme.text_dim)),
-        )
-        .max(100);
+    // Render the label as the block title; the bar fills the 1-row inner area.
+    let block = Block::default()
+        .title(Span::styled(label, theme.text_dim));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    frame.render_widget(spark, area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let w = inner.width as usize;
+    let len = data.len();
+    let offset = len.saturating_sub(w);
+
+    // Build a row of per-value-coloured block-element spans.
+    let spans: Vec<Span> = (0..w)
+        .map(|col| {
+            let v = data.get(offset + col).copied().unwrap_or(0);
+            let idx = ((v as f64 / 100.0) * 8.0).round().clamp(0.0, 8.0) as usize;
+            let color = theme.spark_color(v as f64);
+            Span::styled(theme.spark_chars[idx], Style::default().fg(color))
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 }

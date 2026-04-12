@@ -2,9 +2,11 @@ mod app;
 mod collectors;
 mod config;
 mod error;
+mod glyphs;
 mod input;
 mod models;
 mod ui;
+mod wt;
 
 use clap::Parser;
 use config::{Config, ThemeName};
@@ -25,6 +27,18 @@ struct Args {
     /// Log verbosity (off, error, warn, info, debug, trace)
     #[arg(long, default_value = "warn")]
     log_level: String,
+
+    /// Enable Nerd Font glyphs for panel icons (requires a Nerd Font in your terminal)
+    #[arg(long)]
+    nerd_glyphs: bool,
+
+    /// Disable Nerd Font glyphs (overrides --nerd-glyphs)
+    #[arg(long)]
+    no_nerd_glyphs: bool,
+
+    /// Force ASCII-only borders and sparklines (for minimal/legacy terminals)
+    #[arg(long)]
+    ascii: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,9 +47,30 @@ fn main() -> anyhow::Result<()> {
     // Initialize file-based logging so stdout stays clean for the TUI.
     init_logging(&args.log_level)?;
 
+    let nerd_glyphs = if args.no_nerd_glyphs {
+        false
+    } else if args.nerd_glyphs {
+        true
+    } else {
+        // Auto-hint: if running inside Windows Terminal, default to enabled so
+        // users who have already applied a Nerd Font get icons immediately.
+        std::env::var("WT_SESSION").is_ok()
+    };
+
     let config = Config {
         refresh_interval_ms: args.interval.clamp(250, 5000),
-        theme: if args.theme == "light" { ThemeName::Light } else { ThemeName::Dark },
+        theme: match args.theme.to_lowercase().as_str() {
+            "light"            => ThemeName::Light,
+            "dracula"          => ThemeName::Dracula,
+            "gruvbox"          => ThemeName::Gruvbox,
+            "catppuccin"       => ThemeName::CatppuccinMocha,
+            "catppuccin_mocha" => ThemeName::CatppuccinMocha,
+            "nord"             => ThemeName::Nord,
+            "tokyo_night" | "tokyonight" => ThemeName::TokyoNight,
+            _                  => ThemeName::Dark,
+        },
+        nerd_glyphs,
+        ascii_mode: args.ascii || std::env::var("NO_COLOR").is_ok(),
         ..Config::default()
     };
 

@@ -1,4 +1,6 @@
 use crate::models::network::NetSnapshot;
+use std::collections::HashMap;
+use std::fmt::Write as FmtWrite;
 use std::time::Instant;
 use windows::Win32::NetworkManagement::IpHelper::{
     FreeMibTable, GetIfTable2Ex, MIB_IF_TABLE2, MibIfTableNormal,
@@ -32,21 +34,19 @@ impl NetCollector {
             None => return self.last_snapshot.clone(),
         };
 
+        // Build a lookup map once instead of scanning linearly for each adapter.
+        let prev_map: HashMap<&str, (u64, u64)> = self
+            .last_snapshot
+            .iter()
+            .map(|s| (s.adapter_name.as_str(), (s.rx_total_bytes, s.tx_total_bytes)))
+            .collect();
+
         let mut result = Vec::new();
         for entry in &raw {
-            let prev_rx = self
-                .last_snapshot
-                .iter()
-                .find(|s| s.adapter_name == entry.adapter_name)
-                .map(|s| s.rx_total_bytes)
-                .unwrap_or(entry.rx_total_bytes);
-
-            let prev_tx = self
-                .last_snapshot
-                .iter()
-                .find(|s| s.adapter_name == entry.adapter_name)
-                .map(|s| s.tx_total_bytes)
-                .unwrap_or(entry.tx_total_bytes);
+            let (prev_rx, prev_tx) = prev_map
+                .get(entry.adapter_name.as_str())
+                .copied()
+                .unwrap_or((entry.rx_total_bytes, entry.tx_total_bytes));
 
             let rx_bps = ((entry.rx_total_bytes.saturating_sub(prev_rx)) as f64
                 / elapsed_secs) as u64;
@@ -108,10 +108,12 @@ impl NetCollector {
             let desc_len = desc_slice.iter().position(|&c| c == 0).unwrap_or(desc_slice.len());
             let display_name = String::from_utf16_lossy(&desc_slice[..desc_len]);
 
-            let mac: Vec<String> = row.PhysicalAddress[..row.PhysicalAddressLength as usize]
-                .iter()
-                .map(|b| format!("{b:02X}"))
-                .collect();
+            let addr_bytes = &row.PhysicalAddress[..row.PhysicalAddressLength as usize];
+            let mut mac = String::with_capacity(addr_bytes.len() * 3);
+            for (i, b) in addr_bytes.iter().enumerate() {
+                if i > 0 { mac.push(':'); }
+                let _ = write!(mac, "{b:02X}");
+            }
 
             entries.push(NetSnapshot {
                 adapter_name,
@@ -121,7 +123,7 @@ impl NetCollector {
                 rx_total_bytes: row.InOctets,
                 tx_total_bytes: row.OutOctets,
                 is_up: row.OperStatus.0 == IF_OPER_STATUS_UP,
-                mac_address: mac.join(":"),
+                mac_address: mac,
             });
         }
 

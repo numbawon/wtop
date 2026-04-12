@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::glyphs::Glyphs;
 use crate::models::network::NetSnapshot;
 use crate::ui::theme::Theme;
 
@@ -14,6 +15,7 @@ pub fn render(
     area: Rect,
     networks: &[NetSnapshot],
     theme: &Theme,
+    glyphs: &Glyphs,
     focused: bool,
 ) {
     let border_style = if focused { theme.border_focused } else { theme.border };
@@ -38,7 +40,7 @@ pub fn render(
         networks
             .iter()
             .map(|n| {
-                let up = if n.is_up { "✓" } else { "✗" };
+                let up = if n.is_up { glyphs.net_up } else { glyphs.net_down };
                 Row::new(vec![
                     Cell::from(super::truncate(&n.display_name, 18)),
                     Cell::from(ByteSize(n.rx_bps).to_string() + "/s"),
@@ -63,8 +65,12 @@ pub fn render(
     .block(
         Block::default()
             .borders(Borders::ALL)
+            .border_set(theme.border_set.clone())
             .border_style(border_style)
-            .title(Span::styled(" Network ", theme.title)),
+            .title(Span::styled(
+            format!(" {}Network ", glyphs.net_icon),
+            theme.title,
+        )),
     );
 
     frame.render_widget(table, area);

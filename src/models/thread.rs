@@ -34,4 +34,33 @@ pub struct ThreadEntry {
     /// True if the start address resolves to a module NOT in the process module list.
     /// Heuristic indicator for potential DLL injection.
     pub suspicious: bool,
+    /// Raw Windows wait reason code (only meaningful when state == Waiting).
+    /// Use `wait_reason_label()` to get a human-readable short string.
+    pub wait_reason: u32,
+}
+
+/// Convert a Windows KWAIT_REASON value to a short display label.
+pub fn wait_reason_label(reason: u32) -> &'static str {
+    match reason {
+        0 | 7  => "Exec",     // WrExecutive
+        1 | 8  => "FreePg",   // WrFreePage
+        2 | 9  => "PageIn",   // WrPageIn
+        3 | 10 => "Pool",     // WrPoolAllocation
+        4 | 11 => "Sleep",    // WrDelayExecution
+        5 | 12 => "Suspnd",   // WrSuspended
+        6 | 13 => "User",     // WrUserRequest (UI / message queue)
+        14     => "EvtPair",  // WrEventPair
+        15     => "Queue",    // WrQueue (thread pool worker)
+        16     => "LpcRecv",  // WrLpcReceive
+        17     => "LpcRply",  // WrLpcReply
+        18     => "VirtMem",  // WrVirtualMemory
+        19     => "PageOut",  // WrPageOut
+        26     => "Kernel",   // WrKernel
+        27     => "Rsrc",     // WrResource
+        28     => "Lock",     // WrPushLock
+        29     => "Mutex",    // WrMutex
+        32     => "Prempt",   // WrPreempted
+        35     => "GrdMtx",   // WrGuardedMutex
+        _      => "Wait",
+    }
 }

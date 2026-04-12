@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::glyphs::Glyphs;
 use crate::models::disk::DiskSnapshot;
 use crate::ui::theme::Theme;
 
@@ -14,6 +15,7 @@ pub fn render(
     area: Rect,
     disks: &[DiskSnapshot],
     theme: &Theme,
+    glyphs: &Glyphs,
     focused: bool,
 ) {
     let border_style = if focused { theme.border_focused } else { theme.border };
@@ -62,8 +64,12 @@ pub fn render(
     .block(
         Block::default()
             .borders(Borders::ALL)
+            .border_set(theme.border_set.clone())
             .border_style(border_style)
-            .title(Span::styled(" Disk I/O ", theme.title)),
+            .title(Span::styled(
+            format!(" {}Disk I/O ", glyphs.disk_icon),
+            theme.title,
+        )),
     );
 
     frame.render_widget(table, area);

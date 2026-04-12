@@ -1,6 +1,7 @@
 pub mod cpu_panel;
 pub mod disk_panel;
 pub mod filter_bar;
+pub mod gauge_bar;
 pub mod help_overlay;
 pub mod kill_confirm;
 pub mod layout;
@@ -8,6 +9,7 @@ pub mod memory_panel;
 pub mod network_panel;
 pub mod process_panel;
 pub mod theme;
+pub mod wt_panel;
 
 use chrono::Local;
 use ratatui::{
@@ -18,14 +20,25 @@ use ratatui::{
 };
 
 use crate::app::{AppState, FocusedPanel};
+use crate::glyphs::Glyphs;
 use theme::Theme;
 
 /// Main draw function — called every frame by the event loop.
 pub fn draw(frame: &mut Frame, state: &AppState) {
-    let theme = Theme::default_dark();
+    let theme = if state.config.ascii_mode {
+        Theme::no_color()
+    } else {
+        Theme::for_name(&state.config.theme)
+    };
+    let glyphs = Glyphs::for_config(state.config.nerd_glyphs);
     let area = frame.area();
 
-    let rects = layout::compute(area);
+    let rects = layout::compute(
+        area,
+        &state.config.layout_mode,
+        state.config.show_disk,
+        state.config.show_network,
+    );
 
     // --- CPU panel ---
     if let Ok(cpu) = state.hub.cpu.read() {
@@ -34,6 +47,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             rects.cpu,
             &cpu,
             &theme,
+            &glyphs,
             state.focused_panel == FocusedPanel::Cpu,
         );
     }
@@ -45,28 +59,31 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             rects.memory,
             &mem,
             &theme,
+            &glyphs,
             state.focused_panel == FocusedPanel::Memory,
         );
     }
 
     // --- Disk panel ---
-    if let Ok(disks) = state.hub.disks.read() {
+    if let (Ok(disks), Some(disk_rect)) = (state.hub.disks.read(), rects.disk) {
         disk_panel::render(
             frame,
-            rects.disk,
+            disk_rect,
             &disks,
             &theme,
+            &glyphs,
             state.focused_panel == FocusedPanel::Disk,
         );
     }
 
     // --- Network panel ---
-    if let Ok(nets) = state.hub.networks.read() {
+    if let (Ok(nets), Some(net_rect)) = (state.hub.networks.read(), rects.network) {
         network_panel::render(
             frame,
-            rects.network,
+            net_rect,
             &nets,
             &theme,
+            &glyphs,
             state.focused_panel == FocusedPanel::Network,
         );
     }
@@ -77,6 +94,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         rects.processes,
         state,
         &theme,
+        &glyphs,
         state.focused_panel == FocusedPanel::Processes,
     );
 
@@ -92,6 +110,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         if let Some((pid, ref name)) = state.kill_target {
             kill_confirm::render(frame, area, pid, name, &theme);
         }
+    }
+
+    if state.show_wt_panel {
+        wt_panel::render(frame, area, state, &theme);
     }
 }
 

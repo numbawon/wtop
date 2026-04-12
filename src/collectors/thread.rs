@@ -96,11 +96,11 @@ type NtQuerySystemInformationFn = unsafe extern "system" fn(
 /// Query thread states for all threads system-wide using
 /// NtQuerySystemInformation(SystemProcessInformation=5).
 /// Returns a map of TID → ThreadState.
-fn query_all_thread_states() -> HashMap<u32, ThreadState> {
+fn query_all_thread_states() -> HashMap<u32, (ThreadState, u32)> {
     use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
     use windows::core::PCSTR;
 
-    let mut map = HashMap::new();
+    let mut map: HashMap<u32, (ThreadState, u32)> = HashMap::new();
 
     let ntdll = unsafe { GetModuleHandleW(windows::core::w!("ntdll.dll")).ok() };
     let ntdll = match ntdll {
@@ -168,7 +168,7 @@ fn query_all_thread_states() -> HashMap<u32, ThreadState> {
 
                 let tid = t_info.client_tid as u32;
                 let state = map_thread_state(t_info.thread_state, t_info.wait_reason);
-                map.insert(tid, state);
+                map.insert(tid, (state, t_info.wait_reason));
             }
 
             if proc_ptr.next_entry_offset == 0 {
@@ -245,7 +245,7 @@ pub fn collect_threads(pid: u32) -> Vec<ThreadEntry> {
 fn build_thread_entry(
     te: &THREADENTRY32,
     pid: u32,
-    states: &HashMap<u32, ThreadState>,
+    states: &HashMap<u32, (ThreadState, u32)>,
 ) -> ThreadEntry {
     let tid = te.th32ThreadID;
     let priority = te.tpBasePri as i32;
@@ -253,15 +253,16 @@ fn build_thread_entry(
     let (cpu_time_ms, start_address, start_module, suspicious) =
         query_thread_details(tid, pid).unwrap_or((0, 0, "?".into(), false));
 
-    let state = states
+    let (state, wait_reason) = states
         .get(&tid)
         .copied()
-        .unwrap_or(ThreadState::Unknown);
+        .unwrap_or((ThreadState::Unknown, 0));
 
     ThreadEntry {
         tid,
         owner_pid: pid,
         state,
+        wait_reason,
         cpu_time_ms,
         priority,
         start_module,

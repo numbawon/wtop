@@ -2,16 +2,27 @@ use bytesize::ByteSize;
 use ratatui::{
     layout::{Constraint, Rect},
     style::Style,
-    text::Span,
+    text::{Line, Span},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame,
 };
 
 use crate::app::AppState;
+use crate::config::ProcessColumnId;
+use crate::models::thread::{wait_reason_label, ThreadState};
+use crate::glyphs::Glyphs;
 use crate::models::process::ProcessEntry;
+use crate::ui::gauge_bar::build_block_bar;
 use crate::ui::theme::Theme;
 
-pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, focused: bool) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    theme: &Theme,
+    glyphs: &Glyphs,
+    focused: bool,
+) {
     let border_style = if focused { theme.border_focused } else { theme.border };
 
     let processes = match state.hub.processes.read() {
@@ -19,59 +30,53 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, fo
         Err(_) => return,
     };
 
-    // Filter and collect visible entries.
     let visible: Vec<&ProcessEntry> = processes
         .iter()
-        .filter(|p| {
-            if !state.show_system_processes && crate::app::is_system_account(&p.user) {
-                return false;
-            }
-            if !state.filter_text.is_empty()
-                && !p.name.to_lowercase().contains(&state.filter_text.to_lowercase())
-            {
-                return false;
-            }
-            true
-        })
+        .filter(|p| state.process_matches(p))
         .collect();
 
     let total = processes.len();
     let shown = visible.len();
 
-    // Column widths.
-    let header_cells = [
-        "PID", "NAME", "CPU%", "MEM", "MEM%", "THDS", "STATUS", "USER",
-    ]
-    .iter()
-    .map(|h| {
-        Cell::from(*h).style(theme.header)
-    });
+    // Collect visible columns in order.
+    let cols: Vec<&ProcessColumnId> = state.config.process_columns
+        .iter()
+        .filter(|c| c.visible)
+        .map(|c| &c.id)
+        .collect();
 
+    let constraints: Vec<Constraint> = cols.iter().map(|id| col_constraint(id)).collect();
+
+    let header_cells: Vec<Cell> = cols
+        .iter()
+        .map(|id| Cell::from(col_header(id)).style(theme.header))
+        .collect();
     let header = Row::new(header_cells).height(1).bottom_margin(0);
 
-    // Build rows — each process may have expanded thread sub-rows.
     let mut rows: Vec<Row> = Vec::new();
-    for (idx, proc) in visible.iter().enumerate() {
-        let is_selected = idx == state.process_cursor;
+
+    for (proc_idx, proc) in visible.iter().enumerate() {
+        let is_selected = proc_idx == state.process_cursor;
         let row_style = if is_selected {
             theme.row_selected
+        } else if proc_idx % 2 == 1 {
+            theme.row_zebra
         } else {
             theme.row_normal
         };
 
-        let expand_marker = if proc.expanded { "▼" } else if proc.thread_count > 0 { "▶" } else { " " };
-        let name_col = format!("{} {}", expand_marker, proc.name);
+        let expand_marker = if proc.expanded {
+            glyphs.expand_open
+        } else if proc.thread_count > 0 {
+            glyphs.expand_closed
+        } else {
+            glyphs.expand_none
+        };
 
-        let cells = vec![
-            Cell::from(proc.pid.to_string()),
-            Cell::from(name_col),
-            Cell::from(format!("{:>5.1}", proc.cpu_pct)),
-            Cell::from(ByteSize(proc.mem_bytes).to_string()),
-            Cell::from(format!("{:>4.1}%", proc.mem_pct)),
-            Cell::from(proc.thread_count.to_string()),
-            Cell::from(proc.status.to_string()).style(status_style(proc, theme)),
-            Cell::from(super::truncate(&proc.user, 12)),
-        ];
+        let cells: Vec<Cell> = cols
+            .iter()
+            .map(|id| build_cell(id, proc, expand_marker, row_style, theme))
+            .collect();
 
         rows.push(Row::new(cells).style(row_style));
 
@@ -80,29 +85,41 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, fo
             for (t_idx, thread) in proc.threads.iter().enumerate() {
                 let is_last = t_idx == proc.threads.len() - 1;
                 let tree = if is_last { "  └" } else { "  ├" };
-
                 let thread_style = if thread.suspicious {
                     theme.row_suspicious
                 } else {
                     theme.row_thread
                 };
+                let suspicious_marker = if thread.suspicious { glyphs.suspicious } else { "" };
 
-                let suspicious_marker = if thread.suspicious { " ⚠" } else { "" };
-                let name_cell = format!(
-                    "{} TID:{} {}{}",
-                    tree, thread.tid, thread.state, suspicious_marker
-                );
-
-                let thread_cells = vec![
-                    Cell::from(""),
-                    Cell::from(name_cell),
-                    Cell::from(""),
-                    Cell::from(""),
-                    Cell::from(""),
-                    Cell::from(format!("cpu:{}ms", thread.cpu_time_ms)),
-                    Cell::from(format!("pri:{}", thread.priority)),
-                    Cell::from(super::truncate(&thread.start_module, 20)),
-                ];
+                let thread_cells: Vec<Cell> = cols
+                    .iter()
+                    .map(|id| match id {
+                        ProcessColumnId::Name => {
+                            let state_str = match thread.state {
+                                ThreadState::Waiting => format!(
+                                    "Wait:{}",
+                                    wait_reason_label(thread.wait_reason)
+                                ),
+                                _ => thread.state.to_string(),
+                            };
+                            Cell::from(format!(
+                                "{} TID:{} {}{}",
+                                tree, thread.tid, state_str, suspicious_marker
+                            ))
+                        }
+                        ProcessColumnId::Threads => {
+                            Cell::from(format!("cpu:{}ms", thread.cpu_time_ms))
+                        }
+                        ProcessColumnId::Status => {
+                            Cell::from(format!("pri:{}", thread.priority))
+                        }
+                        ProcessColumnId::User => {
+                            Cell::from(super::truncate(&thread.start_module, 20))
+                        }
+                        _ => Cell::from(""),
+                    })
+                    .collect();
 
                 rows.push(Row::new(thread_cells).style(thread_style));
             }
@@ -116,32 +133,21 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, fo
     );
 
     let title = format!(
-        " Processes  {}  Total:{} Shown:{} ",
-        sort_label, total, shown
+        " {}Processes  {}  Total:{} Shown:{} ",
+        glyphs.proc_icon, sort_label, total, shown
     );
 
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(7),   // PID
-            Constraint::Min(18),     // NAME
-            Constraint::Length(6),   // CPU%
-            Constraint::Length(9),   // MEM
-            Constraint::Length(6),   // MEM%
-            Constraint::Length(5),   // THDS
-            Constraint::Length(8),   // STATUS
-            Constraint::Length(12),  // USER
-        ],
-    )
-    .header(header)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(border_style)
-            .title(Span::styled(title, theme.title)),
-    )
-    .row_highlight_style(theme.row_selected)
-    .highlight_symbol("» ");
+    let table = Table::new(rows, constraints)
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_set(theme.border_set.clone())
+                .border_style(border_style)
+                .title(Span::styled(title, theme.title)),
+        )
+        .row_highlight_style(theme.row_selected)
+        .highlight_symbol(glyphs.row_cursor);
 
     let mut table_state = TableState::default();
     table_state.select(Some(state.process_cursor));
@@ -149,12 +155,76 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme, fo
     frame.render_stateful_widget(table, area, &mut table_state);
 }
 
+fn build_cell<'a>(
+    id: &ProcessColumnId,
+    proc: &ProcessEntry,
+    expand_marker: &str,
+    row_style: Style,
+    theme: &Theme,
+) -> Cell<'a> {
+    match id {
+        ProcessColumnId::Pid => Cell::from(proc.pid.to_string()),
+        ProcessColumnId::Name => Cell::from(format!("{} {}", expand_marker, proc.name)),
+        ProcessColumnId::CpuPct => {
+            // 3-char inline mini bar + padded percentage.
+            // Total width = 3 + 1 space + 6 (" XX.X%") = 10 → col_constraint is Length(10).
+            let bar = build_block_bar(proc.cpu_pct as f64 / 100.0, 3);
+            let pct = format!(" {:>5.1}%", proc.cpu_pct);
+            Cell::from(Line::from(vec![
+                Span::styled(bar, theme.gauge_for_pct(proc.cpu_pct as f64)),
+                Span::styled(pct, row_style),
+            ]))
+        }
+        ProcessColumnId::Mem => Cell::from(ByteSize(proc.mem_bytes).to_string()),
+        ProcessColumnId::MemPct => Cell::from(format!("{:>4.1}%", proc.mem_pct)),
+        ProcessColumnId::Threads => Cell::from(proc.thread_count.to_string()),
+        ProcessColumnId::Status => {
+            Cell::from(proc.status.to_string()).style(status_style(proc, theme))
+        }
+        ProcessColumnId::User => Cell::from(super::truncate(&proc.user, 12)),
+        ProcessColumnId::DiskRead => {
+            Cell::from(format!("{}/s", ByteSize(proc.disk_read_bps)))
+        }
+        ProcessColumnId::DiskWrite => {
+            Cell::from(format!("{}/s", ByteSize(proc.disk_write_bps)))
+        }
+    }
+}
+
+fn col_constraint(id: &ProcessColumnId) -> Constraint {
+    match id {
+        ProcessColumnId::Pid       => Constraint::Length(7),
+        ProcessColumnId::Name      => Constraint::Min(18),
+        ProcessColumnId::CpuPct    => Constraint::Length(10),
+        ProcessColumnId::Mem       => Constraint::Length(9),
+        ProcessColumnId::MemPct    => Constraint::Length(6),
+        ProcessColumnId::Threads   => Constraint::Length(5),
+        ProcessColumnId::Status    => Constraint::Length(8),
+        ProcessColumnId::User      => Constraint::Length(12),
+        ProcessColumnId::DiskRead  => Constraint::Length(11),
+        ProcessColumnId::DiskWrite => Constraint::Length(11),
+    }
+}
+
+fn col_header(id: &ProcessColumnId) -> &'static str {
+    match id {
+        ProcessColumnId::Pid       => "PID",
+        ProcessColumnId::Name      => "NAME",
+        ProcessColumnId::CpuPct    => "CPU%",
+        ProcessColumnId::Mem       => "MEM",
+        ProcessColumnId::MemPct    => "MEM%",
+        ProcessColumnId::Threads   => "THDS",
+        ProcessColumnId::Status    => "STATUS",
+        ProcessColumnId::User      => "USER",
+        ProcessColumnId::DiskRead  => "DISK-R",
+        ProcessColumnId::DiskWrite => "DISK-W",
+    }
+}
+
 fn status_style(proc: &ProcessEntry, theme: &Theme) -> Style {
     match proc.status {
-        crate::models::process::ProcessStatus::Running => theme.status_running,
+        crate::models::process::ProcessStatus::Running   => theme.status_running,
         crate::models::process::ProcessStatus::Suspended => theme.status_suspended,
         _ => theme.status_other,
     }
 }
-
-
