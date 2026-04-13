@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
 
@@ -21,6 +22,7 @@ use windows::Win32::System::Threading::GetCurrentProcess;
 use chrono::Local;
 use crate::input::handler::{handle_key, AppAction};
 use crate::models::process::{sort_processes, SortState};
+use crate::models::inspect::ProcessInspectData;
 use crate::wt::WtInfo;
 
 /// Which panel has keyboard focus.
@@ -78,6 +80,12 @@ pub struct AppState {
     pub status_message: Option<String>,
     /// Windows Terminal environment info, resolved once at startup.
     pub wt_info: WtInfo,
+    /// Whether the process detail inspect overlay is visible.
+    pub show_inspect: bool,
+    /// Data for the currently open inspect overlay.
+    pub inspect_data: Option<ProcessInspectData>,
+    /// Scroll offset for the module list inside the inspect overlay.
+    pub inspect_scroll: usize,
     /// Whether the Windows Terminal info panel overlay is visible.
     pub show_wt_panel: bool,
     /// Whether the "apply Nerd Font" confirmation sub-dialog is active.
@@ -86,6 +94,20 @@ pub struct AppState {
     pub show_settings: bool,
     /// Cursor position within the settings panel (0-indexed over selectable items).
     pub settings_cursor: usize,
+    /// Whether the network adapter filter overlay is open.
+    pub show_net_filter: bool,
+    /// Cursor position within the net filter adapter list.
+    pub net_filter_cursor: usize,
+    /// Whether the jump-to-PID input box is open.
+    pub show_pid_jump: bool,
+    /// Digits typed so far in the PID jump box.
+    pub pid_jump_text: String,
+    /// Set for one frame when the searched PID wasn't found.
+    pub pid_jump_not_found: bool,
+    /// Previous per-process CPU% — used to detect spikes.
+    prev_cpu_pct: HashMap<u32, f32>,
+    /// PIDs that spiked >15 pp since the last sample; counter = frames remaining.
+    pub cpu_spike_flash: HashMap<u32, u8>,
     /// Cached HH:MM:SS timestamp string — refreshed once per second.
     pub cached_time: String,
     /// Unix-second at which `cached_time` was last formatted.
@@ -114,12 +136,44 @@ impl AppState {
             kill_target: None,
             status_message: None,
             wt_info: WtInfo::detect(),
+            show_inspect: false,
+            inspect_data: None,
+            inspect_scroll: 0,
             show_wt_panel: false,
             wt_nerd_font_confirm: false,
             show_settings: false,
             settings_cursor: 0,
+            show_net_filter: false,
+            net_filter_cursor: 0,
+            show_pid_jump: false,
+            pid_jump_text: String::new(),
+            pid_jump_not_found: false,
+            prev_cpu_pct: HashMap::new(),
+            cpu_spike_flash: HashMap::new(),
             cached_time: Local::now().format("%H:%M:%S").to_string(),
             last_time_sec: Local::now().timestamp(),
+        }
+    }
+
+    /// Compare current CPU% values against prev snapshot; start flash counter
+    /// for any PID that jumped more than 15 percentage points. Decrement all
+    /// existing counters, removing entries that reach zero.
+    pub fn update_cpu_spikes(&mut self) {
+        // Decrement / expire existing flash entries.
+        self.cpu_spike_flash.retain(|_, v| {
+            *v = v.saturating_sub(1);
+            *v > 0
+        });
+
+        if let Ok(procs) = self.hub.processes.read() {
+            for p in procs.iter() {
+                let prev = self.prev_cpu_pct.get(&p.pid).copied().unwrap_or(0.0);
+                if p.cpu_pct - prev > 15.0 {
+                    // ~400 ms of flash at 50 ms tick rate (8 frames).
+                    self.cpu_spike_flash.insert(p.pid, 8);
+                }
+                self.prev_cpu_pct.insert(p.pid, p.cpu_pct);
+            }
         }
     }
 
@@ -151,20 +205,32 @@ impl AppState {
         }
         match action {
             AppAction::MoveUp => {
-                if self.process_cursor > 0 {
+                if self.show_inspect {
+                    self.inspect_scroll = self.inspect_scroll.saturating_sub(1);
+                } else if self.process_cursor > 0 {
                     self.process_cursor -= 1;
                 }
             }
             AppAction::MoveDown => {
-                if self.process_cursor + 1 < visible_count {
+                if self.show_inspect {
+                    self.inspect_scroll = self.inspect_scroll.saturating_add(1);
+                } else if self.process_cursor + 1 < visible_count {
                     self.process_cursor += 1;
                 }
             }
             AppAction::PageUp => {
-                self.process_cursor = self.process_cursor.saturating_sub(20);
+                if self.show_inspect {
+                    self.inspect_scroll = self.inspect_scroll.saturating_sub(10);
+                } else {
+                    self.process_cursor = self.process_cursor.saturating_sub(20);
+                }
             }
             AppAction::PageDown => {
-                self.process_cursor = (self.process_cursor + 20).min(visible_count.saturating_sub(1));
+                if self.show_inspect {
+                    self.inspect_scroll = self.inspect_scroll.saturating_add(10);
+                } else {
+                    self.process_cursor = (self.process_cursor + 20).min(visible_count.saturating_sub(1));
+                }
             }
             AppAction::Home => self.process_cursor = 0,
             AppAction::End => self.process_cursor = visible_count.saturating_sub(1),
@@ -238,15 +304,108 @@ impl AppState {
                 self.user_filter_active = !self.user_filter_active;
                 self.process_cursor = 0;
             }
+            AppAction::OpenPidJump => {
+                self.show_pid_jump = true;
+                self.pid_jump_text.clear();
+                self.pid_jump_not_found = false;
+            }
+            AppAction::PidJumpChar(c) => {
+                if self.pid_jump_text.len() < 7 {
+                    self.pid_jump_text.push(c);
+                    self.pid_jump_not_found = false;
+                }
+            }
+            AppAction::PidJumpBackspace => {
+                self.pid_jump_text.pop();
+                self.pid_jump_not_found = false;
+            }
+            AppAction::PidJumpCancel => {
+                self.show_pid_jump = false;
+                self.pid_jump_text.clear();
+                self.pid_jump_not_found = false;
+            }
+            AppAction::PidJumpConfirm => {
+                if let Ok(target_pid) = self.pid_jump_text.parse::<u32>() {
+                    if let Ok(procs) = self.hub.processes.read() {
+                        let pos = procs
+                            .iter()
+                            .filter(|p| self.process_matches(p))
+                            .position(|p| p.pid == target_pid);
+                        if let Some(idx) = pos {
+                            self.process_cursor = idx;
+                            self.show_pid_jump = false;
+                            self.pid_jump_text.clear();
+                            self.pid_jump_not_found = false;
+                        } else {
+                            self.pid_jump_not_found = true;
+                        }
+                    }
+                } else {
+                    self.pid_jump_not_found = true;
+                }
+            }
+            AppAction::NetFilterClose => {
+                self.show_net_filter = false;
+                self.config.save();
+            }
+            AppAction::NetFilterUp => {
+                self.net_filter_cursor = self.net_filter_cursor.saturating_sub(1);
+            }
+            AppAction::NetFilterDown => {
+                if let Ok(nets) = self.hub.networks.read() {
+                    if self.net_filter_cursor + 1 < nets.len() {
+                        self.net_filter_cursor += 1;
+                    }
+                }
+            }
+            AppAction::NetFilterToggle => {
+                if let Ok(nets) = self.hub.networks.read() {
+                    if let Some(n) = nets.get(self.net_filter_cursor) {
+                        let name = n.display_name.clone();
+                        if let Some(pos) = self.config.hidden_adapters.iter().position(|h| h == &name) {
+                            self.config.hidden_adapters.remove(pos);
+                        } else {
+                            self.config.hidden_adapters.push(name);
+                        }
+                    }
+                }
+            }
             AppAction::ToggleHelp => self.show_help = !self.show_help,
-            AppAction::ToggleNerdGlyphs => self.config.nerd_glyphs = !self.config.nerd_glyphs,
+            AppAction::ToggleInspect => {
+                if self.show_inspect {
+                    self.show_inspect = false;
+                    self.inspect_data = None;
+                    self.inspect_scroll = 0;
+                } else {
+                    if let Ok(procs) = self.hub.processes.read() {
+                        let filtered: Vec<(u32, String)> = procs
+                            .iter()
+                            .filter(|p| self.process_matches(p))
+                            .map(|p| (p.pid, p.name.clone()))
+                            .collect();
+                        if let Some((pid, name)) = filtered.get(self.process_cursor) {
+                            self.inspect_data = Some(
+                                crate::collectors::inspect::collect_inspect(*pid, name),
+                            );
+                            self.inspect_scroll = 0;
+                            self.show_inspect = true;
+                        }
+                    }
+                }
+            }
+            AppAction::ToggleNerdGlyphs => {
+                self.config.nerd_glyphs = !self.config.nerd_glyphs;
+                self.config.save();
+            }
             AppAction::CycleTheme => {
                 self.config.theme = self.config.theme.cycle();
                 self.status_message = Some(format!("Theme: {}", self.config.theme.label()));
+                self.config.save();
             }
             AppAction::CycleLayout => {
                 self.config.layout_mode = self.config.layout_mode.cycle();
                 self.status_message = Some(format!("Layout: {}", self.config.layout_mode.label()));
+                self.config.save();
             }
             AppAction::ToggleDisk => {
                 self.config.show_disk = !self.config.show_disk;
@@ -258,6 +417,7 @@ impl AppState {
                 } else {
                     "Disk panel: hidden".to_string()
                 });
+                self.config.save();
             }
             AppAction::ToggleNetwork => {
                 self.config.show_network = !self.config.show_network;
@@ -269,6 +429,7 @@ impl AppState {
                 } else {
                     "Network panel: hidden".to_string()
                 });
+                self.config.save();
             }
             AppAction::ToggleDiskColumns => {
                 let currently_shown = self.config.process_columns
@@ -284,6 +445,7 @@ impl AppState {
                 } else {
                     "Disk I/O columns: hidden".to_string()
                 });
+                self.config.save();
             }
             AppAction::ToggleWtPanel => {
                 self.show_wt_panel = !self.show_wt_panel;
@@ -305,6 +467,7 @@ impl AppState {
                             "Applied \"{}\". Restart Windows Terminal to see the change.",
                             crate::wt::NERD_FONT_FACE
                         ));
+                        self.config.save();
                         self.show_wt_panel = false;
                     }
                     Err(e) => {
@@ -337,10 +500,12 @@ impl AppState {
             AppAction::IncreaseRefresh => {
                 self.config.refresh_interval_ms =
                     (self.config.refresh_interval_ms + 250).min(5000);
+                self.config.save();
             }
             AppAction::DecreaseRefresh => {
                 self.config.refresh_interval_ms =
                     self.config.refresh_interval_ms.saturating_sub(250).max(250);
+                self.config.save();
             }
             _ => {}
         }
@@ -376,7 +541,15 @@ impl AppState {
                 }
             }
             7 => self.config.show_system_processes = !self.config.show_system_processes,
-            8 => {
+            8 => self.config.hide_virtual_adapters = !self.config.hide_virtual_adapters,
+            9 => {
+                // Open the adapter filter overlay.
+                self.show_net_filter = true;
+                self.net_filter_cursor = 0;
+                // Close settings panel while filter is open to avoid overlap.
+                self.show_settings = false;
+            }
+            10 => {
                 if forward {
                     self.config.refresh_interval_ms = (self.config.refresh_interval_ms + 250).min(5000);
                 } else {
@@ -509,6 +682,9 @@ fn event_loop(
         // Drain any thread expansion results.
         state.drain_thread_results();
 
+        // Update CPU spike flash counters.
+        state.update_cpu_spikes();
+
         // Sort processes and compute visible count before drawing.
         let visible_count = {
             if let Ok(mut procs) = state.hub.processes.write() {
@@ -544,6 +720,9 @@ fn event_loop(
                     state.show_wt_panel,
                     state.wt_nerd_font_confirm,
                     state.show_settings,
+                    state.show_inspect,
+                    state.show_pid_jump,
+                    state.show_net_filter,
                 );
                 if action == AppAction::Quit {
                     state.config.save();

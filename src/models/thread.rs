@@ -23,13 +23,17 @@ impl std::fmt::Display for ThreadState {
 pub struct ThreadEntry {
     pub tid: u32,
     pub state: ThreadState,
-    /// Kernel + user CPU time combined in milliseconds.
-    pub cpu_time_ms: u64,
+    /// Kernel CPU time in milliseconds (from GetThreadTimes).
+    pub kernel_ms: u64,
+    /// User CPU time in milliseconds (from GetThreadTimes).
+    pub user_ms: u64,
+    /// Live CPU utilisation percent — delta of (kernel_ms+user_ms) over the last
+    /// collection interval. 0.0 on first collection (no prior sample).
+    pub cpu_pct: f32,
     pub priority: i32,
     /// Module name of the thread's start address (e.g. "ntdll.dll").
     pub start_module: String,
-    /// Raw start address — shown for flagged threads.
-    #[allow(dead_code)]
+    /// Raw start address — shown in the User column for suspicious threads.
     pub start_address: u64,
     /// True if the start address resolves to a module NOT in the process module list.
     /// Heuristic indicator for potential DLL injection.
@@ -37,6 +41,10 @@ pub struct ThreadEntry {
     /// Raw Windows wait reason code (only meaningful when state == Waiting).
     /// Use `wait_reason_label()` to get a human-readable short string.
     pub wait_reason: u32,
+    /// Thread description string set by the thread itself via
+    /// SetThreadDescription / NtSetInformationThread. Present on most
+    /// .NET, Java, and Chromium threads; None for native-only threads.
+    pub name: Option<String>,
 }
 
 /// Convert a Windows KWAIT_REASON value to a short display label.

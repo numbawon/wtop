@@ -1,4 +1,4 @@
-use crate::models::network::NetSnapshot;
+use crate::models::network::{detect_virtual, NetSnapshot};
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::time::Instant;
@@ -62,6 +62,7 @@ impl NetCollector {
                 tx_total_bytes: entry.tx_total_bytes,
                 is_up: entry.is_up,
                 mac_address: entry.mac_address.clone(),
+                is_virtual: entry.is_virtual,
             });
         }
 
@@ -115,8 +116,10 @@ impl NetCollector {
                 let _ = write!(mac, "{b:02X}");
             }
 
+            let is_virtual = detect_virtual(&display_name);
             entries.push(NetSnapshot {
                 adapter_name,
+                is_virtual,
                 display_name,
                 rx_bps: 0,
                 tx_bps: 0,
@@ -130,6 +133,38 @@ impl NetCollector {
         // Safety: FreeMibTable frees the buffer allocated by GetIfTable2Ex.
         unsafe { FreeMibTable(table_ptr as *mut _) };
 
-        Some(entries)
+        // Windows creates multiple MIB_IF_ROW2 entries for the same physical
+        // adapter — one per protocol binding or filter driver layer — all sharing
+        // the same MAC address but with different GUIDs. Use the MAC as the
+        // canonical identity for physical adapters so we show one row per device.
+        // Software adapters (tunnels, WAN miniports) have no MAC, so fall back
+        // to display_name for those.
+        let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut deduped: Vec<NetSnapshot> = Vec::new();
+        for entry in entries {
+            // Physical adapters share a MAC across all their logical interfaces;
+            // virtual/no-MAC adapters are keyed by description.
+            let key = if !entry.mac_address.is_empty() {
+                entry.mac_address.clone()
+            } else {
+                entry.display_name.clone()
+            };
+            if let Some(&idx) = seen.get(&key) {
+                // Keep whichever entry has seen the most traffic — that's the
+                // "real" data-path interface for this device.
+                let new_total = entry.rx_total_bytes + entry.tx_total_bytes;
+                let old_total = deduped[idx].rx_total_bytes + deduped[idx].tx_total_bytes;
+                if new_total > old_total {
+                    let old_key = key.clone();
+                    deduped[idx] = entry;
+                    seen.insert(old_key, idx);
+                }
+            } else {
+                seen.insert(key, deduped.len());
+                deduped.push(entry);
+            }
+        }
+
+        Some(deduped)
     }
 }

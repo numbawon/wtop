@@ -26,6 +26,8 @@ pub struct Theme {
     pub row_selected: Style,
     pub row_thread: Style,
     pub row_suspicious: Style,
+    /// Brief flash style for rows whose CPU% jumped >15 pp since last sample.
+    pub row_spike: Style,
 
     // Status text
     pub status_running: Style,
@@ -111,6 +113,7 @@ impl Theme {
             row_selected:  Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
             row_thread:    Style::default().fg(Color::DarkGray),
             row_suspicious: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            row_spike:     Style::default().fg(Color::Rgb(255, 200, 0)).add_modifier(Modifier::BOLD),
 
             status_running:   Style::default().fg(Color::Green),
             status_suspended: Style::default().fg(Color::Yellow),
@@ -161,6 +164,7 @@ impl Theme {
             row_selected:  Style::default().fg(white).bg(blue).add_modifier(Modifier::BOLD),
             row_thread:    Style::default().fg(dark_gray).bg(white),
             row_suspicious: Style::default().fg(red).add_modifier(Modifier::BOLD).bg(white),
+            row_spike:     Style::default().fg(Color::Rgb(180, 100, 0)).add_modifier(Modifier::BOLD).bg(white),
 
             status_running:   Style::default().fg(green),
             status_suspended: Style::default().fg(amber),
@@ -215,6 +219,7 @@ impl Theme {
             row_selected:  Style::default().fg(fg).bg(bg_sel).add_modifier(Modifier::BOLD),
             row_thread:    Style::default().fg(comment),
             row_suspicious: Style::default().fg(red).add_modifier(Modifier::BOLD),
+            row_spike:     Style::default().fg(orange).add_modifier(Modifier::BOLD),
 
             status_running:   Style::default().fg(green),
             status_suspended: Style::default().fg(orange),
@@ -270,6 +275,7 @@ impl Theme {
             row_selected:  Style::default().fg(fg).bg(bg_sel).add_modifier(Modifier::BOLD),
             row_thread:    Style::default().fg(gray),
             row_suspicious: Style::default().fg(red).add_modifier(Modifier::BOLD),
+            row_spike:     Style::default().fg(orange).add_modifier(Modifier::BOLD),
 
             status_running:   Style::default().fg(green),
             status_suspended: Style::default().fg(yellow),
@@ -326,6 +332,7 @@ impl Theme {
             row_selected:  Style::default().fg(text).bg(surface1).add_modifier(Modifier::BOLD),
             row_thread:    Style::default().fg(overlay0),
             row_suspicious: Style::default().fg(red).add_modifier(Modifier::BOLD),
+            row_spike:     Style::default().fg(peach).add_modifier(Modifier::BOLD),
 
             status_running:   Style::default().fg(green),
             status_suspended: Style::default().fg(peach),
@@ -382,6 +389,7 @@ impl Theme {
             row_selected:  Style::default().fg(snow1).bg(polar3).add_modifier(Modifier::BOLD),
             row_thread:    Style::default().fg(polar4),
             row_suspicious: Style::default().fg(red).add_modifier(Modifier::BOLD),
+            row_spike:     Style::default().fg(orange).add_modifier(Modifier::BOLD),
 
             status_running:   Style::default().fg(green),
             status_suspended: Style::default().fg(yellow),
@@ -438,6 +446,7 @@ impl Theme {
             row_selected:  Style::default().fg(fg).bg(sel).add_modifier(Modifier::BOLD),
             row_thread:    Style::default().fg(comment),
             row_suspicious: Style::default().fg(red).add_modifier(Modifier::BOLD),
+            row_spike:     Style::default().fg(orange).add_modifier(Modifier::BOLD),
 
             status_running:   Style::default().fg(green),
             status_suspended: Style::default().fg(yellow),
@@ -484,6 +493,7 @@ impl Theme {
             row_selected:  invert,
             row_thread:    dim,
             row_suspicious: bold,
+            row_spike:     bold,
 
             status_running:   normal,
             status_suspended: dim,

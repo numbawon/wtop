@@ -58,6 +58,8 @@ pub fn render(
         let is_selected = proc_idx == state.process_cursor;
         let row_style = if is_selected {
             theme.row_selected
+        } else if state.cpu_spike_flash.contains_key(&proc.pid) {
+            theme.row_spike
         } else if proc_idx % 2 == 1 {
             theme.row_zebra
         } else {
@@ -102,19 +104,44 @@ pub fn render(
                                 ),
                                 _ => thread.state.to_string(),
                             };
+                            // Show thread description name in brackets when present,
+                            // plus base priority (useful for spotting elevated threads).
+                            // Cap thread name at 32 chars to prevent very long Java/Chromium
+                            // names from making the row unwieldy.
+                            let name_part = match &thread.name {
+                                Some(n) => format!("[{}] ", super::truncate(n, 32)),
+                                None => String::new(),
+                            };
                             Cell::from(format!(
-                                "{} TID:{} {}{}",
-                                tree, thread.tid, state_str, suspicious_marker
+                                "{} TID:{} p:{} {}{}{}",
+                                tree, thread.tid, thread.priority, name_part, state_str, suspicious_marker
                             ))
                         }
                         ProcessColumnId::Threads => {
-                            Cell::from(format!("cpu:{}ms", thread.cpu_time_ms))
+                            // Show live CPU% rate capped to 4 chars + % to fit Length(5).
+                            // "---" on the very first sample before any delta exists.
+                            if thread.kernel_ms > 0 || thread.user_ms > 0 {
+                                let pct = thread.cpu_pct.min(99.9);
+                                Cell::from(format!("{:.1}%", pct))
+                            } else {
+                                Cell::from("---")
+                            }
                         }
                         ProcessColumnId::Status => {
-                            Cell::from(format!("pri:{}", thread.priority))
+                            // Kernel CPU time — most useful for spotting syscall-heavy threads.
+                            Cell::from(format_kernel_time(thread.kernel_ms))
                         }
                         ProcessColumnId::User => {
-                            Cell::from(super::truncate(&thread.start_module, 20))
+                            // For suspicious threads show the raw start address so the
+                            // analyst can look it up; otherwise show the module name.
+                            if thread.suspicious && thread.start_address != 0 {
+                                Cell::from(super::truncate(
+                                    &format!("0x{:016x}", thread.start_address),
+                                    12,
+                                ))
+                            } else {
+                                Cell::from(super::truncate(&thread.start_module, 12))
+                            }
                         }
                         _ => Cell::from(""),
                     })
@@ -220,5 +247,15 @@ fn status_style(proc: &ProcessEntry, theme: &Theme) -> Style {
         crate::models::process::ProcessStatus::Running   => theme.status_running,
         crate::models::process::ProcessStatus::Suspended => theme.status_suspended,
         _ => theme.status_other,
+    }
+}
+
+/// Format kernel CPU time compactly to fit the 8-char Status column.
+/// Uses ms for values under 10 seconds, seconds otherwise.
+fn format_kernel_time(ms: u64) -> String {
+    if ms < 10_000 {
+        format!("K:{}ms", ms)
+    } else {
+        format!("K:{}s", ms / 1_000)
     }
 }

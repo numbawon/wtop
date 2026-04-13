@@ -11,7 +11,7 @@ use crate::config::ProcessColumnId;
 use crate::ui::theme::Theme;
 
 /// Total number of selectable settings items.
-pub const SETTINGS_COUNT: usize = 9;
+pub const SETTINGS_COUNT: usize = 11;
 
 enum RowKind {
     Header,
@@ -28,7 +28,7 @@ struct SettingRow {
 
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let width  = 58u16.min(area.width);
-    let height = 18u16.min(area.height);
+    let height = 20u16.min(area.height);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -49,8 +49,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         SettingRow { label: "  Disk I/O Columns",   value: shown_hidden(disk_io_shown),                                      kind: RowKind::Item(6)   },
         SettingRow { label: "── Processes",         value: String::new(),                                                     kind: RowKind::Header    },
         SettingRow { label: "  System Processes",   value: shown_hidden(state.config.show_system_processes),                 kind: RowKind::Item(7)   },
-        SettingRow { label: "── General",           value: String::new(),                                                     kind: RowKind::Header    },
-        SettingRow { label: "  Refresh Interval",   value: format!("{}ms", state.config.refresh_interval_ms),               kind: RowKind::Item(8)   },
+        SettingRow { label: "── Network",               value: String::new(),                                                kind: RowKind::Header    },
+        SettingRow { label: "  Hide Virtual Adapters", value: on_off(state.config.hide_virtual_adapters),                   kind: RowKind::Item(8)   },
+        SettingRow { label: "  Adapter Filters →",     value: format!("{} hidden", state.config.hidden_adapters.len()),     kind: RowKind::Item(9)   },
+        SettingRow { label: "── General",              value: String::new(),                                                kind: RowKind::Header    },
+        SettingRow { label: "  Refresh Interval",      value: format!("{}ms", state.config.refresh_interval_ms),           kind: RowKind::Item(10)  },
         SettingRow { label: "",                     value: String::new(),                                                     kind: RowKind::Spacer    },
         SettingRow { label: "  ↑↓ nav  ←→/Enter change  Esc close", value: String::new(),                                   kind: RowKind::Hint      },
     ];

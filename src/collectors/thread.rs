@@ -256,8 +256,8 @@ fn build_thread_entry(
     let tid = te.th32ThreadID;
     let priority = te.tpBasePri as i32;
 
-    let (cpu_time_ms, start_address, start_module, suspicious) =
-        query_thread_details(tid, pid).unwrap_or((0, 0, "?".into(), false));
+    let (kernel_ms, user_ms, start_address, start_module, name, suspicious) =
+        query_thread_details(tid, pid).unwrap_or((0, 0, 0, "?".into(), None, false));
 
     let (state, wait_reason) = states
         .get(&tid)
@@ -268,27 +268,31 @@ fn build_thread_entry(
         tid,
         state,
         wait_reason,
-        cpu_time_ms,
+        kernel_ms,
+        user_ms,
+        cpu_pct: 0.0, // filled in by ProcessCollector after delta computation
         priority,
         start_module,
         start_address,
         suspicious,
+        name,
     }
 }
 
-fn query_thread_details(tid: u32, pid: u32) -> WinResult<(u64, u64, String, bool)> {
+fn query_thread_details(tid: u32, pid: u32) -> WinResult<(u64, u64, u64, String, Option<String>, bool)> {
     let handle = unsafe { OpenThread(THREAD_QUERY_INFORMATION, false, tid)? };
 
-    let cpu_time_ms = get_thread_cpu_time(handle).unwrap_or(0);
+    let (kernel_ms, user_ms) = get_thread_cpu_times(handle).unwrap_or((0, 0));
     let start_address = get_thread_start_address(handle).unwrap_or(0);
+    let name = query_thread_name(handle);
     let (start_module, suspicious) = resolve_module(pid, start_address);
 
     unsafe { let _ = CloseHandle(handle); }
 
-    Ok((cpu_time_ms, start_address, start_module, suspicious))
+    Ok((kernel_ms, user_ms, start_address, start_module, name, suspicious))
 }
 
-fn get_thread_cpu_time(handle: windows::Win32::Foundation::HANDLE) -> Option<u64> {
+fn get_thread_cpu_times(handle: windows::Win32::Foundation::HANDLE) -> Option<(u64, u64)> {
     let mut creation = FILETIME::default();
     let mut exit = FILETIME::default();
     let mut kernel = FILETIME::default();
@@ -298,7 +302,85 @@ fn get_thread_cpu_time(handle: windows::Win32::Foundation::HANDLE) -> Option<u64
         GetThreadTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user).ok()?;
     }
 
-    Some(filetime_to_ms(&kernel) + filetime_to_ms(&user))
+    Some((filetime_to_ms(&kernel), filetime_to_ms(&user)))
+}
+
+/// Query the thread description string via NtQueryInformationThread class 38
+/// (ThreadNameInformation). Returns None for threads that have no name set
+/// or on any error.
+fn query_thread_name(handle: windows::Win32::Foundation::HANDLE) -> Option<String> {
+    use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    use windows::core::PCSTR;
+
+    type NtQueryInformationThreadFn = unsafe extern "system" fn(
+        windows::Win32::Foundation::HANDLE,
+        u32,
+        *mut std::ffi::c_void,
+        u32,
+        *mut u32,
+    ) -> i32;
+
+    let ntdll = unsafe { GetModuleHandleW(windows::core::w!("ntdll.dll")).ok()? };
+    let proc_addr = unsafe {
+        GetProcAddress(ntdll, PCSTR(b"NtQueryInformationThread\0".as_ptr()))
+    }?;
+
+    // Safety: same transmute pattern as get_thread_start_address — documented
+    // NtQueryInformationThread calling convention, correct struct layouts.
+    let nt_query: NtQueryInformationThreadFn =
+        unsafe { std::mem::transmute(proc_addr) };
+
+    // ThreadNameInformation = 38. Returns a UNICODE_STRING header (16 bytes on
+    // x64: Length u16, MaximumLength u16, _pad u32, Buffer *mut u16) followed
+    // immediately by the UTF-16LE string data in the same allocation.
+    // Thread names are rarely longer than 64 chars; 512 bytes is ample.
+    let mut buf = vec![0u8; 512];
+    let mut ret_len: u32 = 0;
+
+    let status = unsafe {
+        nt_query(
+            handle,
+            38,
+            buf.as_mut_ptr() as *mut _,
+            buf.len() as u32,
+            &mut ret_len,
+        )
+    };
+
+    if status != 0 {
+        return None;
+    }
+
+    // UNICODE_STRING layout on x64:
+    //   offset 0: Length        u16   (byte count of string, NOT including NUL)
+    //   offset 2: MaximumLength u16
+    //   offset 4: _pad          u32
+    //   offset 8: Buffer        usize (ptr into our buf, right after this header)
+    if buf.len() < 16 {
+        return None;
+    }
+    let length_bytes = u16::from_le_bytes([buf[0], buf[1]]) as usize;
+    if length_bytes == 0 {
+        return None;
+    }
+
+    // The Buffer pointer stored at bytes 8..16 points into our allocation.
+    // Verify it falls within the buffer before dereferencing.
+    let buf_ptr = usize::from_le_bytes(buf[8..16].try_into().ok()?);
+    let base = buf.as_ptr() as usize;
+    if buf_ptr < base || buf_ptr.saturating_add(length_bytes) > base + buf.len() {
+        return None;
+    }
+    let str_offset = buf_ptr - base;
+    let str_end = str_offset + length_bytes;
+
+    let chars: Vec<u16> = buf[str_offset..str_end]
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+
+    let name = String::from_utf16_lossy(&chars);
+    if name.is_empty() { None } else { Some(name) }
 }
 
 fn filetime_to_ms(ft: &FILETIME) -> u64 {

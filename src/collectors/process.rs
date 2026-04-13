@@ -26,6 +26,9 @@ pub struct ProcessCollector {
     user_cache: HashMap<u32, Arc<str>>,
     /// Unique username strings shared across all processes with the same owner.
     user_intern: HashMap<String, Arc<str>>,
+    /// PID → (Instant of last collection, TID → (kernel_ms, user_ms)).
+    /// Used to compute per-thread CPU% as a delta rate.
+    thread_prev_times: HashMap<u32, (std::time::Instant, HashMap<u32, (u64, u64)>)>,
 }
 
 impl ProcessCollector {
@@ -41,6 +44,7 @@ impl ProcessCollector {
             thread_result_tx,
             user_cache: HashMap::new(),
             user_intern: HashMap::new(),
+            thread_prev_times: HashMap::new(),
         }
     }
 
@@ -118,9 +122,33 @@ impl ProcessCollector {
         let live_pids: std::collections::HashSet<u32> = entries.iter().map(|e| e.pid).collect();
         self.user_cache.retain(|pid, _| live_pids.contains(pid));
 
-        // Handle any pending thread expansion requests.
+        // Handle any pending thread expansion / refresh requests.
         while let Ok(pid) = self.thread_request_rx.try_recv() {
-            let threads = crate::collectors::thread::collect_threads(pid);
+            let mut threads = crate::collectors::thread::collect_threads(pid);
+            let now = std::time::Instant::now();
+
+            // Compute live CPU% as a delta against the previous collection.
+            if let Some((prev_instant, prev_map)) = self.thread_prev_times.get(&pid) {
+                let elapsed_ms = prev_instant.elapsed().as_millis() as f64;
+                if elapsed_ms > 0.0 {
+                    for t in &mut threads {
+                        if let Some(&(prev_k, prev_u)) = prev_map.get(&t.tid) {
+                            let total_now = t.kernel_ms + t.user_ms;
+                            let total_prev = prev_k + prev_u;
+                            let delta = total_now.saturating_sub(total_prev) as f64;
+                            t.cpu_pct = (delta / elapsed_ms * 100.0) as f32;
+                        }
+                    }
+                }
+            }
+
+            // Update prev-times snapshot for this PID.
+            let tid_map: HashMap<u32, (u64, u64)> = threads
+                .iter()
+                .map(|t| (t.tid, (t.kernel_ms, t.user_ms)))
+                .collect();
+            self.thread_prev_times.insert(pid, (now, tid_map));
+
             let _ = self.thread_result_tx.send((pid, threads));
         }
 

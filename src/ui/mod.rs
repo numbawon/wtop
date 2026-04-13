@@ -1,8 +1,11 @@
 pub mod cpu_panel;
+pub mod net_filter_panel;
+pub mod pid_jump;
 pub mod disk_panel;
 pub mod filter_bar;
 pub mod gauge_bar;
 pub mod help_overlay;
+pub mod inspect_panel;
 pub mod kill_confirm;
 pub mod layout;
 pub mod memory_panel;
@@ -13,7 +16,7 @@ pub mod settings_panel;
 pub mod wt_panel;
 
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -82,6 +85,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             frame,
             net_rect,
             &nets,
+            state,
             &theme,
             &glyphs,
             state.focused_panel == FocusedPanel::Network,
@@ -119,6 +123,29 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     if state.show_settings {
         settings_panel::render(frame, area, state, &theme);
     }
+
+    if state.show_inspect {
+        if let Some(ref data) = state.inspect_data {
+            inspect_panel::render(frame, area, data, state.inspect_scroll, &theme);
+        }
+    }
+
+    if state.show_pid_jump {
+        pid_jump::render(frame, area, &state.pid_jump_text, state.pid_jump_not_found, &theme);
+    }
+
+    if state.show_net_filter {
+        if let Ok(nets) = state.hub.networks.read() {
+            net_filter_panel::render(
+                frame,
+                area,
+                &nets,
+                &state.config.hidden_adapters,
+                state.net_filter_cursor,
+                &theme,
+            );
+        }
+    }
 }
 
 fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
@@ -140,13 +167,22 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
     }
 
     {
+        // Split the bar: keybindings on the left, clock on the far right.
+        // "%H:%M:%S" is always 8 chars; add 1 space of padding = 9.
+        let halves = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(9)])
+            .split(area);
+        let left_area  = halves[0];
+        let right_area = halves[1];
+
         let user_filter_span = if state.user_filter_active {
             Span::styled(" [u:UserFilter] ", theme.filter_active)
         } else {
             Span::styled("", theme.text_dim)
         };
 
-        let line = Line::from(vec![
+        let left_line = Line::from(vec![
             Span::styled("q", theme.text_bright),
             Span::styled(":Quit  ", theme.text_dim),
             Span::styled("?", theme.text_bright),
@@ -163,11 +199,14 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
             Span::styled(":UserFilter  ", theme.text_dim),
             user_filter_span,
             Span::styled(&refresh, theme.text_dim),
-            Span::styled("  ", theme.text_dim),
-            Span::styled(now.as_str(), theme.text_dim),
         ]);
-        let para = Paragraph::new(line).style(theme.panel_bg);
-        frame.render_widget(para, area);
+        frame.render_widget(Paragraph::new(left_line).style(theme.panel_bg), left_area);
+
+        let right_line = Line::from(Span::styled(now.as_str(), theme.text_dim));
+        frame.render_widget(
+            Paragraph::new(right_line).style(theme.panel_bg).alignment(Alignment::Right),
+            right_area,
+        );
     }
 }
 

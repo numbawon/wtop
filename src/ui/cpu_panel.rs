@@ -65,15 +65,16 @@ fn render_core_bars(
     theme: &Theme,
     glyphs: &Glyphs,
 ) {
-    let _ = glyphs; // reserved for future per-core glyph decorations
+    let _ = glyphs;
     let core_count = snapshot.cores.len();
     if core_count == 0 || area.height == 0 {
         return;
     }
 
-    // How many cores fit per row given a minimum bar width of ~20 chars?
-    let min_bar_width = 20u16;
-    let cols = (area.width / min_bar_width).max(1) as usize;
+    let min_bar_width = 14u16;
+    let max_cols_by_width = (area.width / min_bar_width).max(1) as usize;
+    let max_rows = area.height as usize;
+    let cols = best_col_count(core_count, max_cols_by_width, max_rows);
     let rows = (core_count + cols - 1) / cols;
 
     let row_constraints: Vec<Constraint> = (0..rows)
@@ -85,20 +86,22 @@ fn render_core_bars(
         .constraints(row_constraints)
         .split(area);
 
+    // All rows use the same `cols`-wide grid so bars stay visually aligned.
+    let col_constraints: Vec<Constraint> =
+        (0..cols).map(|_| Constraint::Ratio(1, cols as u32)).collect();
+
     for (row_i, row_rect) in row_rects.iter().enumerate() {
-        let start = row_i * cols;
-        let end = (start + cols).min(core_count);
-        let cores_in_row = end - start;
-
-        let col_constraints: Vec<Constraint> =
-            (0..cores_in_row).map(|_| Constraint::Ratio(1, cores_in_row as u32)).collect();
-
         let col_rects = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(col_constraints)
+            .constraints(col_constraints.clone())
             .split(*row_rect);
 
-        for (col_i, core) in snapshot.cores[start..end].iter().enumerate() {
+        for col_i in 0..cols {
+            let core_idx = row_i * cols + col_i;
+            if core_idx >= core_count {
+                break;
+            }
+            let core = &snapshot.cores[core_idx];
             let pct = core.usage_pct as f64;
             let label = format!("[{:>2}] {:>5.1}%", core.index, core.usage_pct);
             gauge_bar::render_bar(
@@ -112,6 +115,37 @@ fn render_core_bars(
             );
         }
     }
+}
+
+/// Pick the largest column count ≤ `max_by_width` that:
+/// 1. Produces rows that fit in `max_rows`
+/// 2. Divides `core_count` evenly (preferred) or leaves the fewest orphan slots
+fn best_col_count(core_count: usize, max_by_width: usize, max_rows: usize) -> usize {
+    let cap = max_by_width.min(core_count);
+    if cap == 0 {
+        return 1;
+    }
+
+    let mut best_cols = 1usize;
+    let mut best_orphans = usize::MAX;
+
+    // Iterate largest → smallest; stop as soon as we find a perfect divisor.
+    for c in (1..=cap).rev() {
+        let rows_needed = (core_count + c - 1) / c;
+        if rows_needed > max_rows {
+            continue;
+        }
+        let orphans = if core_count % c == 0 { 0 } else { c - (core_count % c) };
+        if orphans < best_orphans {
+            best_cols = c;
+            best_orphans = orphans;
+        }
+        if best_orphans == 0 {
+            break; // perfect even grid found — no need to check smaller
+        }
+    }
+
+    best_cols
 }
 
 fn render_sparkline(

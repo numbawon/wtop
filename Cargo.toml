@@ -1,6 +1,6 @@
 [package]
 name = "wtop"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A Windows terminal system monitor — htop for Windows"
 license = "MIT"
@@ -39,6 +39,7 @@ windows = { version = "0.58", features = [
     "Win32_System_SystemInformation",
     "Win32_System_LibraryLoader",
     "Win32_NetworkManagement_Ndis",
+    "Win32_Storage_FileSystem",
 ] }
 
 [build-dependencies]

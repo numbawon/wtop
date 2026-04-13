@@ -1,5 +1,6 @@
 pub mod cpu;
 pub mod disk;
+pub mod inspect;
 pub mod memory;
 pub mod network;
 pub mod process;
@@ -121,6 +122,9 @@ impl CollectorHub {
         // Process collector thread.
         {
             let state = Arc::clone(&proc_state);
+            // Clone so the process thread can re-queue refresh requests for
+            // already-expanded processes each collection cycle.
+            let auto_thread_req_tx = thread_req_tx.clone();
             let h = ThreadBuilder::new()
                 .name("wtop-process".into())
                 .spawn(move || {
@@ -155,6 +159,15 @@ impl CollectorHub {
                         // Write lock only for the swap — minimal critical section.
                         if let Ok(mut s) = state.write() {
                             *s = snapshot;
+                        }
+
+                        // Re-queue thread refresh requests for all currently-expanded
+                        // processes. These are drained by collector.collect() next cycle,
+                        // giving live cpu_pct deltas on every process collection interval.
+                        if let Ok(s) = state.read() {
+                            for p in s.iter().filter(|p| p.expanded) {
+                                let _ = auto_thread_req_tx.send(p.pid);
+                            }
                         }
 
                         sleep_thread(Duration::from_millis(interval_ms * 2));

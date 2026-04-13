@@ -131,6 +131,11 @@ pub struct Config {
     pub process_columns: Vec<ProcessColumn>,
     /// Force ASCII borders and sparkline chars regardless of NO_COLOR.
     pub ascii_mode: bool,
+    /// Hide all auto-detected virtual adapters (Hyper-V, Docker, VMware, WSL, …).
+    pub hide_virtual_adapters: bool,
+    /// Adapter display_names that are explicitly hidden in the network panel.
+    #[serde(default)]
+    pub hidden_adapters: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,6 +206,8 @@ impl Default for Config {
             show_network: true,
             process_columns: default_process_columns(),
             ascii_mode: false,
+            hide_virtual_adapters: false,
+            hidden_adapters: Vec::new(),
         }
     }
 }

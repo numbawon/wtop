@@ -43,6 +43,16 @@ pub enum AppAction {
     SettingsDown,
     SettingsActivate,
     SettingsActivateBack,
+    ToggleInspect,
+    OpenPidJump,
+    PidJumpChar(char),
+    PidJumpBackspace,
+    PidJumpConfirm,
+    PidJumpCancel,
+    NetFilterUp,
+    NetFilterDown,
+    NetFilterToggle,
+    NetFilterClose,
     None,
 }
 
@@ -54,7 +64,44 @@ pub fn handle_key(
     wt_panel_active: bool,
     wt_nerd_font_confirm_active: bool,
     settings_active: bool,
+    inspect_active: bool,
+    pid_jump_active: bool,
+    net_filter_active: bool,
 ) -> AppAction {
+    // When the inspect overlay is open, scroll or close.
+    if inspect_active {
+        return match key.code {
+            KeyCode::Char('i') | KeyCode::Esc => AppAction::ToggleInspect,
+            KeyCode::Up    | KeyCode::Char('k') => AppAction::MoveUp,
+            KeyCode::Down  | KeyCode::Char('j') => AppAction::MoveDown,
+            KeyCode::PageUp                     => AppAction::PageUp,
+            KeyCode::PageDown                   => AppAction::PageDown,
+            _ => AppAction::None,
+        };
+    }
+
+    // When the PID jump box is open, only digits / confirm / cancel are accepted.
+    if pid_jump_active {
+        return match key.code {
+            KeyCode::Enter => AppAction::PidJumpConfirm,
+            KeyCode::Esc => AppAction::PidJumpCancel,
+            KeyCode::Backspace => AppAction::PidJumpBackspace,
+            KeyCode::Char(c) if c.is_ascii_digit() => AppAction::PidJumpChar(c),
+            _ => AppAction::None,
+        };
+    }
+
+    // When the net filter overlay is open.
+    if net_filter_active {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => AppAction::NetFilterClose,
+            KeyCode::Up   | KeyCode::Char('k') => AppAction::NetFilterUp,
+            KeyCode::Down | KeyCode::Char('j') => AppAction::NetFilterDown,
+            KeyCode::Enter | KeyCode::Char(' ') => AppAction::NetFilterToggle,
+            _ => AppAction::None,
+        };
+    }
+
     // When the kill confirm dialog is open, only allow confirm or cancel.
     if kill_confirm_active {
         return match key.code {
@@ -132,6 +179,7 @@ pub fn handle_key(
         (_, KeyCode::Char('+')) => AppAction::IncreaseRefresh,
         (_, KeyCode::Char('-')) => AppAction::DecreaseRefresh,
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => AppAction::ToggleHelp,
+        (KeyModifiers::CONTROL, KeyCode::Char('g')) => AppAction::OpenPidJump,
         (_, KeyCode::Char('g')) => AppAction::ToggleNerdGlyphs,
         (KeyModifiers::SHIFT, KeyCode::Char('T')) => AppAction::CycleTheme,
         (KeyModifiers::SHIFT, KeyCode::Char('L')) => AppAction::CycleLayout,
@@ -140,6 +188,7 @@ pub fn handle_key(
         (KeyModifiers::NONE, KeyCode::Char('c')) => AppAction::ToggleDiskColumns,
         (_, KeyCode::Char('w')) => AppAction::ToggleWtPanel,
         (KeyModifiers::SHIFT, KeyCode::Char('C')) | (KeyModifiers::SHIFT, KeyCode::Char('c')) => AppAction::ToggleSettings,
+        (_, KeyCode::Char('i')) => AppAction::ToggleInspect,
         _ => AppAction::None,
     }
 }
