@@ -1,0 +1,58 @@
+# wtop — Tokyo Night theme (night variant)
+# https://github.com/folke/tokyonight.nvim
+
+name         = "Tokyo Night"
+author       = "Folke Lemaitre (folke)"
+version      = "1.0"
+description  = "Port of Tokyo Night (night variant) for wtop."
+homepage     = "https://github.com/folke/tokyonight.nvim"
+border_style = "rounded"
+gauge_style  = "segmented"
+spark_chars  = "unicode"
+
+[palette]
+blue    = "#7aa2f7"
+purple  = "#9d7cd8"
+green   = "#9ece6a"
+yellow  = "#e0af68"
+red     = "#f7768e"
+orange  = "#ff9e64"
+fg      = "#c0caf5"
+comment = "#565f89"
+sel     = "#283457"
+bg_alt  = "#1a1b26"
+
+[colors]
+border           = "comment"
+border_focused   = "blue"
+title            = "blue"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "orange"
+gauge_high       = "red"
+
+row_normal_fg    = "fg"
+row_zebra_fg     = "fg"
+row_zebra_bg     = "bg_alt"
+row_selected_fg  = "fg"
+row_selected_bg  = "sel"
+row_thread       = "comment"
+row_suspicious   = "red"
+row_spike        = "orange"
+
+status_running   = "green"
+status_suspended = "yellow"
+status_other     = "comment"
+
+filter_active_fg = "black"
+filter_active_bg = "yellow"
+filter_inactive  = "comment"
+
+text_dim         = "comment"
+text_normal      = "fg"
+text_bright      = "purple"
+
+spark_low        = "green"
+spark_mid        = "orange"
+spark_high       = "red"

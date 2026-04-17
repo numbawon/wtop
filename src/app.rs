@@ -98,6 +98,22 @@ pub struct AppState {
     pub show_net_filter: bool,
     /// Cursor position within the net filter adapter list.
     pub net_filter_cursor: usize,
+    /// Ordered list of available theme slugs (built-ins + user files).
+    /// Rescanned on each theme cycle to pick up newly dropped files.
+    pub available_themes: Vec<String>,
+    /// Cached rendered theme — rebuilt only when the slug changes or the
+    /// user's override file is modified on disk (mtime check each tick).
+    pub theme_cache: crate::ui::theme::Theme,
+    /// Human-readable display name from the theme file's `name =` field.
+    pub theme_display_name: String,
+    /// Author credit from the theme file's `author =` field.
+    pub theme_author: Option<String>,
+    /// Upstream homepage from the theme file's `homepage =` field.
+    pub theme_homepage: Option<String>,
+    /// Last-known mtime of the active user theme file (None = no file / built-in).
+    theme_cache_mtime: Option<std::time::SystemTime>,
+    /// Slug that was used to build `theme_cache` — detects slug changes.
+    theme_cache_slug: String,
     /// Whether the jump-to-PID input box is open.
     pub show_pid_jump: bool,
     /// Digits typed so far in the PID jump box.
@@ -119,6 +135,17 @@ impl AppState {
         let hub = CollectorHub::spawn(&config);
         let show_sys = config.show_system_processes;
         let current_user_lower = std::env::var("USERNAME").unwrap_or_default().to_lowercase();
+
+        // Export built-in themes to the user themes dir on first launch so
+        // they have working examples to copy and customise.
+        crate::ui::theme_file::export_builtin_themes();
+
+        let available_themes = crate::ui::theme_file::available_themes();
+
+        let initial_theme = crate::ui::theme_file::load_theme(&config.theme);
+        let theme_cache_mtime = crate::ui::theme_file::check_theme_mtime(&config.theme);
+        let theme_cache_slug = config.theme.clone();
+
         Self {
             config,
             hub,
@@ -143,6 +170,13 @@ impl AppState {
             wt_nerd_font_confirm: false,
             show_settings: false,
             settings_cursor: 0,
+            available_themes,
+            theme_cache: initial_theme.theme,
+            theme_display_name: initial_theme.display_name,
+            theme_author: initial_theme.author,
+            theme_homepage: initial_theme.homepage,
+            theme_cache_mtime,
+            theme_cache_slug,
             show_net_filter: false,
             net_filter_cursor: 0,
             show_pid_jump: false,
@@ -175,6 +209,47 @@ impl AppState {
                 self.prev_cpu_pct.insert(p.pid, p.cpu_pct);
             }
         }
+    }
+
+    /// Check whether the active theme file has changed on disk and reload if so.
+    /// Also reloads if the slug changed (e.g. after a cycle).
+    /// Parse errors are surfaced as a one-time status bar message.
+    pub fn refresh_theme(&mut self) {
+        let slug = self.config.theme.clone();
+        let current_mtime = crate::ui::theme_file::check_theme_mtime(&slug);
+
+        let slug_changed  = slug != self.theme_cache_slug;
+        let file_modified = current_mtime != self.theme_cache_mtime;
+
+        if slug_changed || file_modified {
+            let result = crate::ui::theme_file::load_theme(&slug);
+            if let Some(err) = result.error {
+                self.status_message = Some(format!("Theme error: {err} — using built-in fallback"));
+            }
+            self.theme_display_name = result.display_name;
+            self.theme_author       = result.author;
+            self.theme_homepage     = result.homepage;
+            self.theme_cache        = result.theme;
+            self.theme_cache_slug   = slug;
+            self.theme_cache_mtime  = current_mtime;
+        }
+    }
+
+    /// Advance (or retreat) to the next available theme, wrapping around.
+    /// Rescans the themes directory first to pick up any newly dropped files.
+    fn cycle_theme(&mut self, forward: bool) {
+        // Rescan so files added since startup appear immediately.
+        self.available_themes = crate::ui::theme_file::available_themes();
+
+        let themes = &self.available_themes;
+        if themes.is_empty() { return; }
+        let current = themes.iter().position(|t| t == &self.config.theme).unwrap_or(0);
+        let next = if forward {
+            (current + 1) % themes.len()
+        } else {
+            current.checked_sub(1).unwrap_or(themes.len() - 1)
+        };
+        self.config.theme = themes[next].clone();
     }
 
     /// Refresh `cached_time` if the wall-clock second has advanced.
@@ -398,8 +473,9 @@ impl AppState {
                 self.config.save();
             }
             AppAction::CycleTheme => {
-                self.config.theme = self.config.theme.cycle();
-                self.status_message = Some(format!("Theme: {}", self.config.theme.label()));
+                self.cycle_theme(true);
+                self.refresh_theme();
+                self.status_message = Some(format!("Theme: {}", self.theme_display_name));
                 self.config.save();
             }
             AppAction::CycleLayout => {
@@ -514,7 +590,7 @@ impl AppState {
     fn apply_setting(&mut self, forward: bool) {
         use crate::config::ProcessColumnId;
         match self.settings_cursor {
-            0 => self.config.theme = if forward { self.config.theme.cycle() } else { self.config.theme.cycle_back() },
+            0 => self.cycle_theme(forward),
             1 => self.config.layout_mode = if forward { self.config.layout_mode.cycle() } else { self.config.layout_mode.cycle_back() },
             2 => self.config.nerd_glyphs = !self.config.nerd_glyphs,
             3 => self.config.ascii_mode = !self.config.ascii_mode,
@@ -669,6 +745,7 @@ fn event_loop(
 
     loop {
         state.tick_time();
+        state.refresh_theme();
 
         // Check for dead collector threads (they only stop if they panicked).
         let dead = state.hub.dead_collectors();

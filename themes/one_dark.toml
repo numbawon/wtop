@@ -1,0 +1,62 @@
+# wtop — One Dark theme
+# https://github.com/atom/one-dark-syntax
+#
+# Popularized by Atom editor; widely ported across editors and terminals.
+# Palette reference: atom/one-dark-syntax variables.less
+
+name         = "One Dark"
+author       = "Bram de Haan"
+version      = "1.0"
+description  = "Port of Atom One Dark for wtop."
+homepage     = "https://github.com/atom/one-dark-syntax"
+border_style = "rounded"
+gauge_style  = "segmented"
+spark_chars  = "unicode"
+
+[palette]
+blue    = "#61afef"
+purple  = "#c678dd"
+green   = "#98c379"
+yellow  = "#e5c07b"
+orange  = "#d19a66"
+red     = "#e06c75"
+cyan    = "#56b6c2"
+fg      = "#abb2bf"
+comment = "#5c6370"
+sel     = "#3e4451"
+bg_alt  = "#21252b"
+
+[colors]
+border           = "comment"
+border_focused   = "blue"
+title            = "blue"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "orange"
+gauge_high       = "red"
+
+row_normal_fg    = "fg"
+row_zebra_fg     = "fg"
+row_zebra_bg     = "bg_alt"
+row_selected_fg  = "fg"
+row_selected_bg  = "sel"
+row_thread       = "comment"
+row_suspicious   = "red"
+row_spike        = "orange"
+
+status_running   = "green"
+status_suspended = "yellow"
+status_other     = "comment"
+
+filter_active_fg = "black"
+filter_active_bg = "yellow"
+filter_inactive  = "comment"
+
+text_dim         = "comment"
+text_normal      = "fg"
+text_bright      = "purple"
+
+spark_low        = "green"
+spark_mid        = "orange"
+spark_high       = "red"

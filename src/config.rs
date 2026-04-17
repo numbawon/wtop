@@ -91,7 +91,8 @@ impl LayoutMode {
 }
 
 /// How gauges and bars are drawn.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum GaugeStyle {
     /// Filled solid block — standard ratatui `Gauge` widget.
     Block,
@@ -114,8 +115,9 @@ pub struct Config {
     pub refresh_interval_ms: u64,
     /// Number of CPU history samples to keep for sparklines.
     pub cpu_history_len: usize,
-    /// Active color theme name.
-    pub theme: ThemeName,
+    /// Active color theme slug — matches a filename in the themes directory
+    /// ("dark", "dracula", "my_theme", …).
+    pub theme: String,
     /// Whether system processes are shown by default.
     pub show_system_processes: bool,
     /// Use Nerd Font private-use glyphs for panel icons and markers.
@@ -138,58 +140,13 @@ pub struct Config {
     pub hidden_adapters: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThemeName {
-    Dark,
-    Light,
-    Dracula,
-    Gruvbox,
-    CatppuccinMocha,
-    Nord,
-    TokyoNight,
-}
-
-impl Default for ThemeName {
-    fn default() -> Self { Self::Dark }
-}
-
-impl ThemeName {
-    /// Advance to the next theme in the cycle.
-    pub fn cycle(&self) -> Self {
-        match self {
-            Self::Dark            => Self::Light,
-            Self::Light           => Self::Dracula,
-            Self::Dracula         => Self::Gruvbox,
-            Self::Gruvbox         => Self::CatppuccinMocha,
-            Self::CatppuccinMocha => Self::Nord,
-            Self::Nord            => Self::TokyoNight,
-            Self::TokyoNight      => Self::Dark,
-        }
-    }
-
-    /// Step back to the previous theme.
-    pub fn cycle_back(&self) -> Self {
-        match self {
-            Self::Dark            => Self::TokyoNight,
-            Self::Light           => Self::Dark,
-            Self::Dracula         => Self::Light,
-            Self::Gruvbox         => Self::Dracula,
-            Self::CatppuccinMocha => Self::Gruvbox,
-            Self::Nord            => Self::CatppuccinMocha,
-            Self::TokyoNight      => Self::Nord,
-        }
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Dark            => "Dark",
-            Self::Light           => "Light",
-            Self::Dracula         => "Dracula",
-            Self::Gruvbox         => "Gruvbox",
-            Self::CatppuccinMocha => "Catppuccin Mocha",
-            Self::Nord            => "Nord",
-            Self::TokyoNight      => "Tokyo Night",
-        }
+/// Normalise a theme name from any format into a lowercase slug.
+/// Handles legacy PascalCase names serialised by the old `ThemeName` enum.
+fn normalize_theme_slug(name: &str) -> String {
+    match name.to_lowercase().replace(['-', ' '], "_").as_str() {
+        "catppuccinmocha" | "catppuccin" => "catppuccin_mocha".to_string(),
+        "tokyonight"                     => "tokyo_night".to_string(),
+        other                            => other.to_string(),
     }
 }
 
@@ -198,7 +155,7 @@ impl Default for Config {
         Self {
             refresh_interval_ms: 1000,
             cpu_history_len: 60,
-            theme: ThemeName::Dark,
+            theme: "dark".to_string(),
             show_system_processes: true,
             nerd_glyphs: false,
             layout_mode: LayoutMode::Auto,
@@ -222,7 +179,10 @@ impl Config {
     pub fn load() -> Self {
         let path = Self::config_path();
         if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Ok(config) = toml::from_str::<Config>(&text) {
+            if let Ok(mut config) = toml::from_str::<Config>(&text) {
+                // Normalise legacy PascalCase theme names from v0.1.x configs
+                // ("Dark" → "dark", "CatppuccinMocha" → "catppuccin_mocha", …).
+                config.theme = normalize_theme_slug(&config.theme);
                 return config;
             }
         }

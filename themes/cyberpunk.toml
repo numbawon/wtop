@@ -1,0 +1,59 @@
+# wtop — Cyberpunk theme
+# Neon-soaked dark palette inspired by cyberpunk aesthetics.
+# Neons: cyan #00e5ff · pink #ff2d78 · yellow #f5f50a · green #39ff14
+# Base:  deep purple-black backgrounds, muted purple midtones
+
+name         = "Cyberpunk"
+author       = "Chad Collins"
+version      = "1.0"
+description  = "Neon-soaked dark theme inspired by cyberpunk aesthetics."
+border_style = "double"
+gauge_style  = "segmented"
+spark_chars  = "unicode"
+
+[palette]
+neon_cyan   = "#00e5ff"
+neon_pink   = "#ff2d78"
+neon_yellow = "#f5f50a"
+acid_green  = "#39ff14"
+purple      = "#b14cff"
+orange      = "#ff9100"
+fg          = "#e0d7ff"
+comment     = "#5c4a8a"
+sel         = "#1a0a3d"
+bg_alt      = "#12062e"
+
+[colors]
+border           = "comment"
+border_focused   = "neon_cyan"
+title            = "neon_cyan"
+header           = "neon_yellow"
+
+gauge_low        = "acid_green"
+gauge_medium     = "orange"
+gauge_high       = "neon_pink"
+
+row_normal_fg    = "fg"
+row_zebra_fg     = "fg"
+row_zebra_bg     = "bg_alt"
+row_selected_fg  = "neon_cyan"
+row_selected_bg  = "sel"
+row_thread       = "comment"
+row_suspicious   = "neon_pink"
+row_spike        = "orange"
+
+status_running   = "acid_green"
+status_suspended = "neon_yellow"
+status_other     = "comment"
+
+filter_active_fg = "black"
+filter_active_bg = "neon_cyan"
+filter_inactive  = "comment"
+
+text_dim         = "comment"
+text_normal      = "fg"
+text_bright      = "neon_cyan"
+
+spark_low        = "acid_green"
+spark_mid        = "orange"
+spark_high       = "neon_pink"

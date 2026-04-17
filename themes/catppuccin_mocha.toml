@@ -1,0 +1,58 @@
+# wtop — Catppuccin Mocha theme
+# https://github.com/catppuccin/catppuccin
+
+name         = "Catppuccin Mocha"
+author       = "Catppuccin Org"
+version      = "1.0"
+description  = "Port of Catppuccin Mocha for wtop."
+homepage     = "https://github.com/catppuccin/catppuccin"
+border_style = "rounded"
+gauge_style  = "segmented"
+spark_chars  = "unicode"
+
+[palette]
+mauve    = "#cba6f7"
+blue     = "#89b4fa"
+green    = "#a6e3a1"
+yellow   = "#f9e2af"
+red      = "#f38ba8"
+peach    = "#fab387"
+text     = "#cdd6f4"
+overlay0 = "#6c7086"
+surface1 = "#45475a"
+base_alt = "#181825"
+
+[colors]
+border           = "overlay0"
+border_focused   = "mauve"
+title            = "mauve"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "peach"
+gauge_high       = "red"
+
+row_normal_fg    = "text"
+row_zebra_fg     = "text"
+row_zebra_bg     = "base_alt"
+row_selected_fg  = "text"
+row_selected_bg  = "surface1"
+row_thread       = "overlay0"
+row_suspicious   = "red"
+row_spike        = "peach"
+
+status_running   = "green"
+status_suspended = "peach"
+status_other     = "overlay0"
+
+filter_active_fg = "black"
+filter_active_bg = "yellow"
+filter_inactive  = "overlay0"
+
+text_dim         = "overlay0"
+text_normal      = "text"
+text_bright      = "blue"
+
+spark_low        = "green"
+spark_mid        = "peach"
+spark_high       = "red"

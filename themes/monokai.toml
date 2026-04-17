@@ -1,0 +1,61 @@
+# wtop — Monokai theme
+# https://monokai.nl/
+#
+# The original Monokai color scheme by Wimer Hazenberg, created in 2006.
+# Popularized as the default theme in Sublime Text.
+
+name         = "Monokai"
+author       = "Wimer Hazenberg"
+version      = "1.0"
+description  = "Port of the Monokai color scheme for wtop."
+homepage     = "https://monokai.nl"
+border_style = "plain"
+gauge_style  = "block"
+spark_chars  = "unicode"
+
+[palette]
+yellow  = "#e6db74"
+green   = "#a6e22e"
+orange  = "#fd971f"
+red     = "#f92672"
+purple  = "#ae81ff"
+cyan    = "#66d9e8"
+fg      = "#f8f8f2"
+comment = "#75715e"
+sel     = "#49483e"
+bg_alt  = "#1e1f1c"
+
+[colors]
+border           = "comment"
+border_focused   = "orange"
+title            = "orange"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "orange"
+gauge_high       = "red"
+
+row_normal_fg    = "fg"
+row_zebra_fg     = "fg"
+row_zebra_bg     = "bg_alt"
+row_selected_fg  = "fg"
+row_selected_bg  = "sel"
+row_thread       = "comment"
+row_suspicious   = "red"
+row_spike        = "orange"
+
+status_running   = "green"
+status_suspended = "yellow"
+status_other     = "comment"
+
+filter_active_fg = "black"
+filter_active_bg = "yellow"
+filter_inactive  = "comment"
+
+text_dim         = "comment"
+text_normal      = "fg"
+text_bright      = "cyan"
+
+spark_low        = "green"
+spark_mid        = "orange"
+spark_high       = "red"

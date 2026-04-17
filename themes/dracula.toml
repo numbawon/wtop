@@ -1,0 +1,58 @@
+# wtop — Dracula theme
+# https://draculatheme.com/
+
+name         = "Dracula"
+author       = "Zeno Rocha"
+version      = "1.0"
+description  = "Port of the Dracula color scheme for wtop."
+homepage     = "https://draculatheme.com"
+border_style = "rounded"
+gauge_style  = "line"
+spark_chars  = "unicode"
+
+[palette]
+purple  = "#bd93f9"
+cyan    = "#8be9fd"
+green   = "#50fa7b"
+orange  = "#ffb86c"
+red     = "#ff5555"
+yellow  = "#f1fa8c"
+fg      = "#f8f8f2"
+comment = "#6272a4"
+bg_sel  = "#44475a"
+bg_alt  = "#282a36"
+
+[colors]
+border           = "comment"
+border_focused   = "purple"
+title            = "purple"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "orange"
+gauge_high       = "red"
+
+row_normal_fg    = "fg"
+row_zebra_fg     = "fg"
+row_zebra_bg     = "bg_alt"
+row_selected_fg  = "fg"
+row_selected_bg  = "bg_sel"
+row_thread       = "comment"
+row_suspicious   = "red"
+row_spike        = "orange"
+
+status_running   = "green"
+status_suspended = "orange"
+status_other     = "comment"
+
+filter_active_fg = "black"
+filter_active_bg = "yellow"
+filter_inactive  = "comment"
+
+text_dim         = "comment"
+text_normal      = "fg"
+text_bright      = "cyan"
+
+spark_low        = "green"
+spark_mid        = "orange"
+spark_high       = "red"

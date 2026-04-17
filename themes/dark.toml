@@ -1,0 +1,56 @@
+# wtop — Dark theme (built-in default)
+# Copy this file to %APPDATA%\wtop\themes\ and edit to create your own theme.
+# All color values accept: hex (#rrggbb, #rgb) or terminal color names
+# (black, red, green, yellow, blue, magenta, cyan, gray, dark_gray,
+#  light_red, light_green, light_yellow, light_blue, light_magenta,
+#  light_cyan, white, reset).
+#
+# border_style: plain | rounded | thick | double
+# gauge_style:  block | line | segmented | ascii
+# spark_chars:  unicode | ascii
+
+name         = "Dark"
+author       = "Chad Collins"
+version      = "1.0"
+description  = "Default dark theme using standard terminal colors."
+border_style = "plain"
+gauge_style  = "block"
+spark_chars  = "unicode"
+
+# Named palette — reference these by name in [colors] below.
+[palette]
+
+[colors]
+border           = "dark_gray"
+border_focused   = "cyan"
+title            = "cyan"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "yellow"
+gauge_high       = "red"
+
+row_normal_fg    = "white"
+row_zebra_fg     = "white"
+row_zebra_bg     = "#161620"
+row_selected_fg  = "black"
+row_selected_bg  = "cyan"
+row_thread       = "dark_gray"
+row_suspicious   = "red"
+row_spike        = "#ffc800"
+
+status_running   = "green"
+status_suspended = "yellow"
+status_other     = "gray"
+
+filter_active_fg = "black"
+filter_active_bg = "yellow"
+filter_inactive  = "dark_gray"
+
+text_dim         = "dark_gray"
+text_normal      = "white"
+text_bright      = "white"
+
+spark_low        = "green"
+spark_mid        = "yellow"
+spark_high       = "red"

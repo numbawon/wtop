@@ -1,4 +1,5 @@
 pub mod cpu_panel;
+pub mod theme_file;
 pub mod net_filter_panel;
 pub mod pid_jump;
 pub mod disk_panel;
@@ -28,10 +29,12 @@ use theme::Theme;
 
 /// Main draw function — called every frame by the event loop.
 pub fn draw(frame: &mut Frame, state: &AppState) {
+    let no_color_theme;
     let theme = if state.config.ascii_mode {
-        Theme::no_color()
+        no_color_theme = Theme::no_color();
+        &no_color_theme
     } else {
-        Theme::for_name(&state.config.theme)
+        &state.theme_cache
     };
     let glyphs = Glyphs::for_config(state.config.nerd_glyphs);
     let area = frame.area();

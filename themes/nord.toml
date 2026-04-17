@@ -1,0 +1,62 @@
+# wtop — Nord theme
+# https://www.nordtheme.com/
+# Polar Night: #2e3440 #3b4252 #434c5e #4c566a
+# Snow Storm:  #d8dee9 #e5e9f0 #eceff4
+# Frost:       #8fbcbb #88c0d0 #81a1c1 #5e81ac
+# Aurora:      #bf616a #d08770 #ebcb8b #a3be8c #b48ead
+
+name         = "Nord"
+author       = "Arctic Ice Studio (Sven Greb)"
+version      = "1.0"
+description  = "Port of the Nord color palette for wtop."
+homepage     = "https://www.nordtheme.com"
+border_style = "rounded"
+gauge_style  = "line"
+spark_chars  = "unicode"
+
+[palette]
+frost2  = "#88c0d0"
+frost3  = "#81a1c1"
+red     = "#bf616a"
+orange  = "#d08770"
+yellow  = "#ebcb8b"
+green   = "#a3be8c"
+snow1   = "#d8dee9"
+polar3  = "#434c5e"
+polar4  = "#4c566a"
+bg_alt  = "#3b4252"
+
+[colors]
+border           = "polar4"
+border_focused   = "frost2"
+title            = "frost2"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "orange"
+gauge_high       = "red"
+
+row_normal_fg    = "snow1"
+row_zebra_fg     = "snow1"
+row_zebra_bg     = "bg_alt"
+row_selected_fg  = "snow1"
+row_selected_bg  = "polar3"
+row_thread       = "polar4"
+row_suspicious   = "red"
+row_spike        = "orange"
+
+status_running   = "green"
+status_suspended = "yellow"
+status_other     = "polar4"
+
+filter_active_fg = "black"
+filter_active_bg = "frost2"
+filter_inactive  = "polar4"
+
+text_dim         = "polar4"
+text_normal      = "snow1"
+text_bright      = "frost3"
+
+spark_low        = "green"
+spark_mid        = "orange"
+spark_high       = "red"

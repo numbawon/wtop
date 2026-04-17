@@ -8,7 +8,7 @@ mod ui;
 mod wt;
 
 use clap::Parser;
-use config::{Config, ThemeName};
+use config::Config;
 use tracing_subscriber::EnvFilter;
 
 /// wtop — Windows terminal system monitor
@@ -38,12 +38,48 @@ struct Args {
     /// Force ASCII-only borders and sparklines (for minimal/legacy terminals)
     #[arg(long)]
     ascii: bool,
+
+    /// List all available themes and exit
+    #[arg(long)]
+    list_themes: bool,
+
+    /// Re-export all built-in themes to the themes directory (overwrites existing) and exit
+    #[arg(long)]
+    export_themes: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     init_logging(&args.log_level)?;
+
+    // Handle informational flags that print and exit before starting the UI.
+    if args.list_themes {
+        let themes = ui::theme_file::available_themes();
+        for slug in &themes {
+            let r = ui::theme_file::load_theme(slug);
+            // slug  Name  Author  Description  Homepage
+            let author_ver = match (r.author.as_deref(), r.version.as_deref()) {
+                (Some(a), Some(v)) => format!("{a} (v{v})"),
+                (Some(a), None)    => a.to_string(),
+                (None,    Some(v)) => format!("v{v}"),
+                (None,    None)    => String::new(),
+            };
+            let desc   = r.description.as_deref().unwrap_or("");
+            let home   = r.homepage.as_deref().unwrap_or("");
+            println!("{:<20} {:<22} {:<36} {}", slug, r.display_name, author_ver, desc);
+            if !home.is_empty() {
+                println!("{:<20} {}", "", home);
+            }
+        }
+        return Ok(());
+    }
+
+    if args.export_themes {
+        let dir = ui::theme_file::export_builtin_themes_force();
+        println!("Built-in themes exported to {}", dir.display());
+        return Ok(());
+    }
 
     // Start from saved config, then let CLI flags override.
     let mut config = Config::load();
@@ -52,15 +88,8 @@ fn main() -> anyhow::Result<()> {
         config.refresh_interval_ms = ms.clamp(250, 5000);
     }
     if let Some(ref theme) = args.theme {
-        config.theme = match theme.to_lowercase().as_str() {
-            "light"                        => ThemeName::Light,
-            "dracula"                      => ThemeName::Dracula,
-            "gruvbox"                      => ThemeName::Gruvbox,
-            "catppuccin" | "catppuccin_mocha" => ThemeName::CatppuccinMocha,
-            "nord"                         => ThemeName::Nord,
-            "tokyo_night" | "tokyonight"   => ThemeName::TokyoNight,
-            _                              => ThemeName::Dark,
-        };
+        // Accept any slug — theme_file::load_theme normalises aliases.
+        config.theme = theme.to_lowercase();
     }
     if args.nerd_glyphs    { config.nerd_glyphs = true; }
     if args.no_nerd_glyphs { config.nerd_glyphs = false; }

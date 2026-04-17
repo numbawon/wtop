@@ -76,10 +76,12 @@ wtop --ascii                                          # basic terminal or CI
 | Flag | Default | |
 |------|---------|---|
 | `-i, --interval <ms>` | `1000` | Refresh rate in ms · 250–5000 |
-| `-t, --theme <name>` | `dark` | Color theme |
+| `-t, --theme <name>` | `dark` | Color theme slug |
 | `--nerd-glyphs` | | Enable Nerd Font icons (auto-detected in Windows Terminal) |
 | `--no-nerd-glyphs` | | Force off |
 | `--ascii` | | ASCII-only borders and sparklines |
+| `--list-themes` | | Print all available themes with author info and exit |
+| `--export-themes` | | Re-export built-in themes to the themes directory and exit |
 | `--log-level <lvl>` | `warn` | `off` · `error` · `warn` · `info` · `debug` · `trace` |
 
 Logs go to `%TEMP%\wtop.log`.
@@ -155,7 +157,9 @@ Logs go to `%TEMP%\wtop.log`.
 
 `--theme <name>` at launch, or cycle at runtime with <kbd>Shift</kbd><kbd>T</kbd>.
 
-`dark` · `light` · `dracula` · `gruvbox` · `catppuccin` · `nord` · `tokyo_night`
+`dark` · `light` · `catppuccin_mocha` · `cyberpunk` · `dracula` · `gruvbox` · `monokai` · `nord` · `one_dark` · `solarized_dark` · `tokyo_night`
+
+Themes are TOML files in `%APPDATA%\wtop\themes\`. Built-ins are exported there on first launch — copy and edit to make your own. Drop any `.toml` in the directory and it appears in the cycle immediately, live-reloaded as you edit. See [`themes/README.md`](themes/README.md) for the full schema.
 
 ![Themes](docs/screenshots/themes.gif)
 

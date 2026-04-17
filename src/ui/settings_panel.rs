@@ -21,14 +21,29 @@ enum RowKind {
 }
 
 struct SettingRow {
-    label: &'static str,
+    label: String,
     value: String,
     kind: RowKind,
 }
 
+impl SettingRow {
+    fn header(label: &'static str) -> Self {
+        Self { label: label.into(), value: String::new(), kind: RowKind::Header }
+    }
+    fn item(label: &'static str, value: String, idx: usize) -> Self {
+        Self { label: label.into(), value, kind: RowKind::Item(idx) }
+    }
+    fn hint(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self { label: label.into(), value: value.into(), kind: RowKind::Hint }
+    }
+    fn spacer() -> Self {
+        Self { label: String::new(), value: String::new(), kind: RowKind::Spacer }
+    }
+}
+
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let width  = 58u16.min(area.width);
-    let height = 20u16.min(area.height);
+    let height = 22u16.min(area.height);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -37,31 +52,48 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         .iter()
         .any(|c| c.id == ProcessColumnId::DiskRead && c.visible);
 
-    let rows_spec: Vec<SettingRow> = vec![
-        SettingRow { label: "── Display",          value: String::new(),                                                     kind: RowKind::Header    },
-        SettingRow { label: "  Theme",              value: state.config.theme.label().into(),                                 kind: RowKind::Item(0)   },
-        SettingRow { label: "  Layout",             value: state.config.layout_mode.label().into(),                          kind: RowKind::Item(1)   },
-        SettingRow { label: "  Nerd Font Glyphs",   value: on_off(state.config.nerd_glyphs),                                 kind: RowKind::Item(2)   },
-        SettingRow { label: "  ASCII Mode",         value: on_off(state.config.ascii_mode),                                  kind: RowKind::Item(3)   },
-        SettingRow { label: "── Panels",            value: String::new(),                                                     kind: RowKind::Header    },
-        SettingRow { label: "  Disk Panel",         value: shown_hidden(state.config.show_disk),                             kind: RowKind::Item(4)   },
-        SettingRow { label: "  Network Panel",      value: shown_hidden(state.config.show_network),                          kind: RowKind::Item(5)   },
-        SettingRow { label: "  Disk I/O Columns",   value: shown_hidden(disk_io_shown),                                      kind: RowKind::Item(6)   },
-        SettingRow { label: "── Processes",         value: String::new(),                                                     kind: RowKind::Header    },
-        SettingRow { label: "  System Processes",   value: shown_hidden(state.config.show_system_processes),                 kind: RowKind::Item(7)   },
-        SettingRow { label: "── Network",               value: String::new(),                                                kind: RowKind::Header    },
-        SettingRow { label: "  Hide Virtual Adapters", value: on_off(state.config.hide_virtual_adapters),                   kind: RowKind::Item(8)   },
-        SettingRow { label: "  Adapter Filters →",     value: format!("{} hidden", state.config.hidden_adapters.len()),     kind: RowKind::Item(9)   },
-        SettingRow { label: "── General",              value: String::new(),                                                kind: RowKind::Header    },
-        SettingRow { label: "  Refresh Interval",      value: format!("{}ms", state.config.refresh_interval_ms),           kind: RowKind::Item(10)  },
-        SettingRow { label: "",                     value: String::new(),                                                     kind: RowKind::Spacer    },
-        SettingRow { label: "  ↑↓ nav  ←→/Enter change  Esc close", value: String::new(),                                   kind: RowKind::Hint      },
+    let mut rows_spec: Vec<SettingRow> = vec![
+        SettingRow::header("── Display"),
+        SettingRow::item("  Theme", state.theme_display_name.clone(), 0),
     ];
+
+    // Attribution row: show author + homepage when the theme has metadata.
+    let author   = state.theme_author.as_deref().unwrap_or("");
+    let homepage = state.theme_homepage.as_deref()
+        .map(shorten_url)
+        .unwrap_or("");
+    if !author.is_empty() || !homepage.is_empty() {
+        let label = if author.is_empty() {
+            String::new()
+        } else {
+            format!("    by {author}")
+        };
+        rows_spec.push(SettingRow::hint(label, homepage));
+    }
+
+    rows_spec.extend([
+        SettingRow::item("  Layout",             state.config.layout_mode.label().into(),                       1),
+        SettingRow::item("  Nerd Font Glyphs",   on_off(state.config.nerd_glyphs),                              2),
+        SettingRow::item("  ASCII Mode",         on_off(state.config.ascii_mode),                               3),
+        SettingRow::header("── Panels"),
+        SettingRow::item("  Disk Panel",         shown_hidden(state.config.show_disk),                          4),
+        SettingRow::item("  Network Panel",      shown_hidden(state.config.show_network),                       5),
+        SettingRow::item("  Disk I/O Columns",   shown_hidden(disk_io_shown),                                   6),
+        SettingRow::header("── Processes"),
+        SettingRow::item("  System Processes",   shown_hidden(state.config.show_system_processes),              7),
+        SettingRow::header("── Network"),
+        SettingRow::item("  Hide Virtual Adapters", on_off(state.config.hide_virtual_adapters),                 8),
+        SettingRow::item("  Adapter Filters →",     format!("{} hidden", state.config.hidden_adapters.len()),   9),
+        SettingRow::header("── General"),
+        SettingRow::item("  Refresh Interval",   format!("{}ms", state.config.refresh_interval_ms),            10),
+        SettingRow::spacer(),
+        SettingRow::hint("  ↑↓ nav  ←→/Enter change  Esc close", ""),
+    ]);
 
     let rows: Vec<Row> = rows_spec.iter().map(|r| {
         let (label_style, value_style, row_style) = styles_for(&r.kind, state.settings_cursor, theme);
         Row::new(vec![
-            Cell::from(r.label).style(label_style),
+            Cell::from(r.label.as_str()).style(label_style),
             Cell::from(r.value.as_str()).style(value_style),
         ]).style(row_style)
     }).collect();
@@ -93,5 +125,12 @@ fn styles_for(kind: &RowKind, cursor: usize, theme: &Theme) -> (Style, Style, St
     }
 }
 
-fn on_off(v: bool)      -> String { if v { "On".into()     } else { "Off".into()    } }
+/// Strip common URL prefixes so a homepage fits in the value column.
+fn shorten_url(url: &str) -> &str {
+    url.trim_start_matches("https://")
+       .trim_start_matches("http://")
+       .trim_start_matches("www.")
+}
+
+fn on_off(v: bool)       -> String { if v { "On".into()     } else { "Off".into()    } }
 fn shown_hidden(v: bool) -> String { if v { "Shown".into() } else { "Hidden".into() } }

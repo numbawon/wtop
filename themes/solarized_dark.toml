@@ -1,0 +1,64 @@
+# wtop — Solarized Dark theme
+# https://ethanschoonover.com/solarized/
+#
+# Base palette (Solarized):
+#   Base03 #002b36  Base02 #073642  Base01 #586e75  Base00 #657b83
+#   Base0  #839496  Base1  #93a1a1  Base2  #eee8d5  Base3  #fdf6e3
+# Accents: yellow #b58900  orange #cb4b16  red #dc322f  magenta #d33682
+#          violet #6c71c4  blue   #268bd2  cyan #2aa198  green  #859900
+
+name         = "Solarized Dark"
+author       = "Ethan Schoonover"
+version      = "1.0"
+description  = "Port of Solarized Dark for wtop."
+homepage     = "https://ethanschoonover.com/solarized"
+border_style = "plain"
+gauge_style  = "line"
+spark_chars  = "unicode"
+
+[palette]
+blue    = "#268bd2"
+cyan    = "#2aa198"
+green   = "#859900"
+yellow  = "#b58900"
+orange  = "#cb4b16"
+red     = "#dc322f"
+fg      = "#839496"
+comment = "#586e75"
+bg_alt  = "#073642"
+sel     = "#073642"
+
+[colors]
+border           = "comment"
+border_focused   = "blue"
+title            = "blue"
+header           = "yellow"
+
+gauge_low        = "green"
+gauge_medium     = "yellow"
+gauge_high       = "red"
+
+row_normal_fg    = "fg"
+row_zebra_fg     = "fg"
+row_zebra_bg     = "bg_alt"
+row_selected_fg  = "fg"
+row_selected_bg  = "sel"
+row_thread       = "comment"
+row_suspicious   = "red"
+row_spike        = "orange"
+
+status_running   = "green"
+status_suspended = "yellow"
+status_other     = "comment"
+
+filter_active_fg = "black"
+filter_active_bg = "cyan"
+filter_inactive  = "comment"
+
+text_dim         = "comment"
+text_normal      = "fg"
+text_bright      = "cyan"
+
+spark_low        = "green"
+spark_mid        = "yellow"
+spark_high       = "red"

@@ -1,0 +1,55 @@
+# wtop — Light theme
+# panel_bg sets an explicit background on overlay panels and all table rows so
+# that black text is readable regardless of the terminal's default background.
+
+name         = "Light"
+author       = "Chad Collins"
+version      = "1.0"
+description  = "Light theme with explicit white backgrounds for readability."
+border_style = "plain"
+gauge_style  = "block"
+spark_chars  = "unicode"
+panel_bg     = "white"
+
+[palette]
+green  = "#008c00"
+amber  = "#b47800"
+zebra  = "#e6ebfa"
+
+[colors]
+border           = "gray"
+border_focused   = "blue"
+title            = "blue"
+header           = "#824600"
+
+gauge_low        = "green"
+gauge_medium     = "amber"
+gauge_high       = "red"
+
+# row_bg forces an explicit background on normal/thread/suspicious/spike rows —
+# needed on light themes so text is readable over any terminal background.
+row_bg           = "white"
+row_normal_fg    = "black"
+row_zebra_fg     = "black"
+row_zebra_bg     = "zebra"
+row_selected_fg  = "white"
+row_selected_bg  = "blue"
+row_thread       = "dark_gray"
+row_suspicious   = "red"
+row_spike        = "#b46400"
+
+status_running   = "green"
+status_suspended = "amber"
+status_other     = "gray"
+
+filter_active_fg = "white"
+filter_active_bg = "blue"
+filter_inactive  = "gray"
+
+text_dim         = "dark_gray"
+text_normal      = "black"
+text_bright      = "black"
+
+spark_low        = "green"
+spark_mid        = "amber"
+spark_high       = "red"
