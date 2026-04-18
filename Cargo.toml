@@ -1,6 +1,6 @@
 [package]
 name = "wtop"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "A Windows terminal system monitor - htop for Windows"
 license = "MIT"
@@ -51,5 +51,6 @@ winresource = "0.1"
 
 [profile.release]
 opt-level = 3
-lto = "thin"
+lto = true
+codegen-units = 1
 strip = true
