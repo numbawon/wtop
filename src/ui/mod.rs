@@ -4,6 +4,8 @@ pub mod name_search;
 pub mod net_filter_panel;
 pub mod pid_jump;
 pub mod disk_panel;
+pub mod gpu_panel;
+pub mod services_panel;
 pub mod filter_bar;
 pub mod gauge_bar;
 pub mod help_overlay;
@@ -45,6 +47,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         &state.config.layout_mode,
         state.config.show_disk,
         state.config.show_network,
+        state.config.show_gpu,
     );
 
     if let Ok(cpu) = state.hub.cpu.read() {
@@ -77,6 +80,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             theme,
             &glyphs,
             state.focused_panel == FocusedPanel::Disk,
+        );
+    }
+
+    if let (Ok(gpus), Some(gpu_rect)) = (state.hub.gpus.read(), rects.gpu) {
+        gpu_panel::render(
+            frame,
+            gpu_rect,
+            &gpus,
+            theme,
+            &glyphs,
+            state.focused_panel == FocusedPanel::Gpu,
         );
     }
 
@@ -143,6 +157,19 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 &nets,
                 &state.config.hidden_adapters,
                 state.net_filter_cursor,
+                theme,
+            );
+        }
+    }
+
+    if state.show_services {
+        if let Ok(svcs) = state.hub.services.read() {
+            services_panel::render(
+                frame,
+                area,
+                &svcs,
+                state.services_cursor,
+                &state.services_filter,
                 theme,
             );
         }

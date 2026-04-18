@@ -127,6 +127,8 @@ pub struct Config {
     pub show_disk: bool,
     /// Whether the Network panel is visible.
     pub show_network: bool,
+    /// Whether the GPU panel is visible.
+    pub show_gpu: bool,
     /// Ordered, per-column visibility for the process table.
     #[serde(default = "default_process_columns")]
     pub process_columns: Vec<ProcessColumn>,
@@ -164,6 +166,7 @@ impl Default for Config {
             layout_mode: LayoutMode::Auto,
             show_disk: true,
             show_network: true,
+            show_gpu: true,
             process_columns: default_process_columns(),
             ascii_mode: false,
             hide_virtual_adapters: false,

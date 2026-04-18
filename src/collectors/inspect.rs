@@ -915,7 +915,7 @@ pub fn get_open_handles(pid: u32) -> Vec<HandleEntry> {
             } else { String::new() }
         } else { String::new() };
 
-        // Resolve name: for disk files only (pipes block GetFinalPathNameByHandle).
+        // Resolve name: full path for disk files; NT object name for other named types.
         let name = if type_name == "File" {
             let ft = unsafe { GetFileType(dup) };
             if ft == FILE_TYPE_DISK {
@@ -934,6 +934,13 @@ pub fn get_open_handles(pid: u32) -> Vec<HandleEntry> {
             } else {
                 String::new()
             }
+        } else if matches!(
+            type_name.as_str(),
+            "Key" | "Section" | "Event" | "Mutant" | "Semaphore" | "SymbolicLink" | "Directory"
+        ) {
+            // Query NT object name (ObjectNameInformation = 1).
+            // Safe for these types - they do not block.
+            nt_obj.map_or(String::new(), |f| query_nt_object_name(f, dup))
         } else {
             String::new()
         };
@@ -960,6 +967,64 @@ pub fn get_open_handles(pid: u32) -> Vec<HandleEntry> {
     });
 
     results
+}
+
+// ── NT object name query ──────────────────────────────────────────────────────
+
+type NtQueryObjectFnRef = unsafe extern "system" fn(
+    windows::Win32::Foundation::HANDLE, u32, *mut std::ffi::c_void, u32, *mut u32
+) -> i32;
+
+/// Query ObjectNameInformation (class 1) from a duplicated handle.
+/// Returns the NT path string, or empty string on failure.
+fn query_nt_object_name(
+    nt_obj: NtQueryObjectFnRef,
+    dup: windows::Win32::Foundation::HANDLE,
+) -> String {
+    let mut buf = vec![0u8; 1024];
+    let mut ret_len: u32 = 0;
+    let s = unsafe { nt_obj(dup, 1, buf.as_mut_ptr() as *mut _, buf.len() as u32, &mut ret_len) };
+    if s != 0 || buf.len() < 16 {
+        return String::new();
+    }
+    // UNICODE_STRING: Length(u16), MaxLength(u16), [4-byte pad on x64], Buffer(*u16)
+    let char_len = u16::from_le_bytes([buf[0], buf[1]]) as usize;
+    if char_len == 0 {
+        return String::new();
+    }
+    let ptr_val = usize::from_le_bytes(buf[8..16].try_into().unwrap_or([0u8; 8]));
+    let base = buf.as_ptr() as usize;
+    if ptr_val < base || ptr_val + char_len > base + buf.len() {
+        return String::new();
+    }
+    let off = ptr_val - base;
+    let chars: Vec<u16> = buf[off..off + char_len]
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let raw = String::from_utf16_lossy(&chars).to_string();
+    normalize_nt_path(&raw)
+}
+
+/// Convert NT registry paths to friendly names and clean device paths.
+fn normalize_nt_path(path: &str) -> String {
+    let p = path;
+    // Registry: \REGISTRY\MACHINE\... → HKLM\...
+    if let Some(rest) = p.strip_prefix(r"\REGISTRY\MACHINE\") {
+        return format!("HKLM\\{}", rest);
+    }
+    // Registry: \REGISTRY\USER\S-..._Classes\... → HKCR\...
+    if let Some(rest) = p.strip_prefix(r"\REGISTRY\USER\") {
+        if let Some(after_sid) = rest.split_once('\\') {
+            if after_sid.0.ends_with("_Classes") {
+                return format!("HKCR\\{}", after_sid.1);
+            }
+            return format!("HKCU\\{}", after_sid.1);
+        }
+        return format!("HKCU\\{}", rest);
+    }
+    // Device paths: \Device\HarddiskVolume3\Windows\... → keep as-is (best we can do)
+    p.to_string()
 }
 
 // ── Network connections (GetExtendedTcpTable / GetExtendedUdpTable) ──────────

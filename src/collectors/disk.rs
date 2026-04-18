@@ -1,4 +1,5 @@
 use crate::models::disk::DiskSnapshot;
+use crate::models::RingBuffer;
 use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows::Win32::System::Performance::{
     PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
@@ -147,6 +148,7 @@ impl DiskCollector {
                 utilization_pct: util_pct,
                 free_bytes,
                 total_bytes,
+                util_history: RingBuffer::new(0),
             });
         }
 

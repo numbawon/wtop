@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind, MouseButton, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use windows::Win32::Foundation::CloseHandle;
@@ -21,7 +22,7 @@ use windows::Win32::Security::{
 use windows::Win32::System::Threading::GetCurrentProcess;
 use chrono::Local;
 use crate::input::handler::{handle_key, AppAction, ModalState};
-use crate::models::process::{sort_processes, SortState};
+use crate::models::process::{sort_processes, ProcessSortField, SortState};
 use crate::models::inspect::ProcessInspectData;
 use crate::wt::WtInfo;
 
@@ -56,6 +57,7 @@ pub enum FocusedPanel {
     Memory,
     Disk,
     Network,
+    Gpu,
     Processes,
 }
 
@@ -65,7 +67,8 @@ impl FocusedPanel {
             Self::Cpu => Self::Memory,
             Self::Memory => Self::Disk,
             Self::Disk => Self::Network,
-            Self::Network => Self::Processes,
+            Self::Network => Self::Gpu,
+            Self::Gpu => Self::Processes,
             Self::Processes => Self::Cpu,
         }
     }
@@ -75,7 +78,8 @@ impl FocusedPanel {
             Self::Memory => Self::Cpu,
             Self::Disk => Self::Memory,
             Self::Network => Self::Disk,
-            Self::Processes => Self::Network,
+            Self::Gpu => Self::Network,
+            Self::Processes => Self::Gpu,
         }
     }
 }
@@ -168,6 +172,12 @@ pub struct AppState {
     pub name_search_text: String,
     /// Set for one frame when no process matched the search.
     pub name_search_not_found: bool,
+    /// Whether the services overlay is visible.
+    pub show_services: bool,
+    /// Cursor row within the services panel.
+    pub services_cursor: usize,
+    /// Filter text typed while services panel is open.
+    pub services_filter: String,
     /// Flat display order for tree view: indices into the sorted+filtered visible list.
     /// Identity mapping in flat mode; DFS order in tree mode.
     pub tree_display_order: Vec<usize>,
@@ -243,6 +253,9 @@ impl AppState {
             show_name_search: false,
             name_search_text: String::new(),
             name_search_not_found: false,
+            show_services: false,
+            services_cursor: 0,
+            services_filter: String::new(),
             tree_display_order: Vec::new(),
             prev_cpu_pct: HashMap::new(),
             cpu_spike_flash: HashMap::new(),
@@ -762,6 +775,18 @@ impl AppState {
                 });
                 self.config.save();
             }
+            AppAction::ToggleGpu => {
+                self.config.show_gpu = !self.config.show_gpu;
+                if !self.config.show_gpu && self.focused_panel == FocusedPanel::Gpu {
+                    self.focused_panel = FocusedPanel::Processes;
+                }
+                self.status_message = Some(if self.config.show_gpu {
+                    "GPU panel: shown".to_string()
+                } else {
+                    "GPU panel: hidden".to_string()
+                });
+                self.config.save();
+            }
             AppAction::ToggleNetwork => {
                 self.config.show_network = !self.config.show_network;
                 if !self.config.show_network && self.focused_panel == FocusedPanel::Network {
@@ -873,6 +898,41 @@ impl AppState {
                     }
                 }
             }
+            AppAction::ToggleServices => {
+                self.show_services = !self.show_services;
+                if !self.show_services {
+                    self.services_cursor = 0;
+                    self.services_filter.clear();
+                }
+            }
+            AppAction::ServicesUp => {
+                self.services_cursor = self.services_cursor.saturating_sub(1);
+            }
+            AppAction::ServicesDown => {
+                let count = self.filtered_services_count();
+                if self.services_cursor + 1 < count {
+                    self.services_cursor += 1;
+                }
+            }
+            AppAction::ServicesPageUp => {
+                self.services_cursor = self.services_cursor.saturating_sub(10);
+            }
+            AppAction::ServicesPageDown => {
+                let count = self.filtered_services_count();
+                self.services_cursor = (self.services_cursor + 10).min(count.saturating_sub(1));
+            }
+            AppAction::ServicesFilterChar(c) => {
+                self.services_filter.push(c);
+                self.services_cursor = 0;
+            }
+            AppAction::ServicesFilterBackspace => {
+                self.services_filter.pop();
+                self.services_cursor = 0;
+            }
+            AppAction::ServicesFilterClear => {
+                self.services_filter.clear();
+                self.services_cursor = 0;
+            }
             AppAction::ToggleSettings => {
                 self.show_settings = !self.show_settings;
                 if !self.show_settings {
@@ -953,7 +1013,45 @@ impl AppState {
                 self.config.tree_view = !self.config.tree_view;
                 self.process_cursor = 0;
             }
+            23 => {
+                self.config.show_gpu = !self.config.show_gpu;
+                if !self.config.show_gpu && self.focused_panel == FocusedPanel::Gpu {
+                    self.focused_panel = FocusedPanel::Processes;
+                }
+            }
+            13 => self.toggle_column(ProcessColumnId::Pid),
+            14 => self.toggle_column(ProcessColumnId::Name),
+            15 => self.toggle_column(ProcessColumnId::CpuPct),
+            16 => self.toggle_column(ProcessColumnId::Mem),
+            17 => self.toggle_column(ProcessColumnId::MemPct),
+            18 => self.toggle_column(ProcessColumnId::Threads),
+            19 => self.toggle_column(ProcessColumnId::Status),
+            20 => self.toggle_column(ProcessColumnId::User),
+            21 => self.toggle_column(ProcessColumnId::DiskRead),
+            22 => self.toggle_column(ProcessColumnId::DiskWrite),
             _ => {}
+        }
+    }
+
+    fn toggle_column(&mut self, id: ProcessColumnId) {
+        if let Some(col) = self.config.process_columns.iter_mut().find(|c| c.id == id) {
+            col.visible = !col.visible;
+            self.config.save();
+        }
+    }
+
+    fn filtered_services_count(&self) -> usize {
+        if let Ok(svcs) = self.hub.services.read() {
+            if self.services_filter.is_empty() {
+                return svcs.len();
+            }
+            let lower = self.services_filter.to_lowercase();
+            svcs.iter()
+                .filter(|s| s.name.to_lowercase().contains(&lower)
+                    || s.display_name.to_lowercase().contains(&lower))
+                .count()
+        } else {
+            0
         }
     }
 
@@ -1091,14 +1189,14 @@ pub fn run(config: Config) -> anyhow::Result<()> {
     enable_debug_privilege();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let result = event_loop(&mut terminal, config);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     result
@@ -1159,31 +1257,175 @@ fn event_loop(
         })?;
 
         if event::poll(tick)? {
-            if let Event::Key(key) = event::read()? {
-                // On Windows, crossterm fires both Press and Release events.
-                // Only act on Press to prevent every key from registering twice.
-                if key.kind != KeyEventKind::Press {
-                    continue;
+            match event::read()? {
+                Event::Key(key) => {
+                    // On Windows, crossterm fires both Press and Release events.
+                    // Only act on Press to prevent every key from registering twice.
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+                    let action = handle_key(key, &ModalState {
+                        filter_active:                state.filter_active,
+                        kill_confirm_active:          state.show_kill_confirm,
+                        wt_panel_active:              state.show_wt_panel,
+                        wt_nerd_font_confirm_active:  state.wt_nerd_font_confirm,
+                        settings_active:              state.show_settings,
+                        inspect_active:               state.show_inspect,
+                        inspect_close_confirm_active: state.inspect_close_confirm,
+                        pid_jump_active:              state.show_pid_jump,
+                        net_filter_active:            state.show_net_filter,
+                        help_active:                  state.show_help,
+                        name_search_active:           state.show_name_search,
+                        services_active:              state.show_services,
+                    });
+                    if action == AppAction::Quit {
+                        state.config.save();
+                        return Ok(());
+                    }
+                    state.dispatch(action, visible_count);
                 }
-                let action = handle_key(key, &ModalState {
-                    filter_active:                state.filter_active,
-                    kill_confirm_active:          state.show_kill_confirm,
-                    wt_panel_active:              state.show_wt_panel,
-                    wt_nerd_font_confirm_active:  state.wt_nerd_font_confirm,
-                    settings_active:              state.show_settings,
-                    inspect_active:               state.show_inspect,
-                    inspect_close_confirm_active: state.inspect_close_confirm,
-                    pid_jump_active:              state.show_pid_jump,
-                    net_filter_active:            state.show_net_filter,
-                    help_active:                  state.show_help,
-                    name_search_active:           state.show_name_search,
-                });
-                if action == AppAction::Quit {
-                    state.config.save();
-                    return Ok(());
+                Event::Mouse(mouse) => {
+                    let sz = terminal.size()?;
+                    let term_rect = ratatui::layout::Rect::new(0, 0, sz.width, sz.height);
+                    handle_mouse_event(mouse, &mut state, visible_count, term_rect);
                 }
-                state.dispatch(action, visible_count);
+                _ => {}
             }
         }
     }
+}
+
+fn handle_mouse_event(
+    mouse: crossterm::event::MouseEvent,
+    state: &mut AppState,
+    visible_count: usize,
+    term_size: ratatui::layout::Rect,
+) {
+    // Skip mouse events when any modal overlay is open - keyboard takes priority.
+    if state.show_inspect || state.show_kill_confirm || state.show_settings
+        || state.show_wt_panel || state.show_pid_jump || state.show_net_filter
+        || state.show_help || state.show_name_search || state.filter_active
+        || state.show_services
+    {
+        return;
+    }
+
+    let rects = crate::ui::layout::compute(
+        term_size,
+        &state.config.layout_mode,
+        state.config.show_disk,
+        state.config.show_network,
+        state.config.show_gpu,
+    );
+
+    let mc = mouse.column;
+    let mr = mouse.row;
+    let in_rect = |r: ratatui::layout::Rect| {
+        mc >= r.x && mc < r.x + r.width && mr >= r.y && mr < r.y + r.height
+    };
+
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            state.dispatch(AppAction::MoveUp, visible_count);
+        }
+        MouseEventKind::ScrollDown => {
+            state.dispatch(AppAction::MoveDown, visible_count);
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if in_rect(rects.processes) {
+                state.focused_panel = FocusedPanel::Processes;
+                let header_y = rects.processes.y + 1; // y+1 = inside border
+                let data_start_y = rects.processes.y + 2; // +1 for header row
+                if mr == header_y && mc > rects.processes.x {
+                    // Column header click - sort by that column
+                    let inner_x = (mc - (rects.processes.x + 1)) as usize;
+                    let inner_width = rects.processes.width.saturating_sub(2) as usize;
+                    let vis_cols: Vec<&ProcessColumnId> = state.config.process_columns
+                        .iter()
+                        .filter(|c| c.visible)
+                        .map(|c| &c.id)
+                        .collect();
+                    if let Some(sf) = col_sort_field_at_x(&vis_cols, inner_width, inner_x) {
+                        if state.sort_state.field == sf {
+                            state.sort_state.ascending = !state.sort_state.ascending;
+                        } else {
+                            state.sort_state.field = sf;
+                            state.sort_state.ascending = false;
+                        }
+                    }
+                } else if mr >= data_start_y && visible_count > 0 {
+                    let display_row = (mr - data_start_y) as usize;
+                    if display_row < visible_count {
+                        state.process_cursor = display_row;
+                    }
+                }
+            } else if in_rect(rects.cpu) {
+                state.focused_panel = FocusedPanel::Cpu;
+            } else if in_rect(rects.memory) {
+                state.focused_panel = FocusedPanel::Memory;
+            } else if rects.disk.is_some_and(|r| in_rect(r)) {
+                state.focused_panel = FocusedPanel::Disk;
+            } else if rects.network.is_some_and(|r| in_rect(r)) {
+                state.focused_panel = FocusedPanel::Network;
+            } else if rects.gpu.is_some_and(|r| in_rect(r)) {
+                state.focused_panel = FocusedPanel::Gpu;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Map a click x-position (relative to process panel inner area) to a sort field.
+/// Returns None for columns that have no corresponding sort field.
+fn col_sort_field_at_x(
+    vis_cols: &[&ProcessColumnId],
+    inner_width: usize,
+    click_x: usize,
+) -> Option<ProcessSortField> {
+    // Fixed column widths matching col_constraint() in process_panel.rs.
+    let fixed_total: usize = vis_cols.iter().filter_map(|id| match id {
+        ProcessColumnId::Name => None,
+        ProcessColumnId::Pid       => Some(7usize),
+        ProcessColumnId::CpuPct    => Some(10),
+        ProcessColumnId::Mem       => Some(9),
+        ProcessColumnId::MemPct    => Some(6),
+        ProcessColumnId::Threads   => Some(5),
+        ProcessColumnId::Status    => Some(8),
+        ProcessColumnId::User      => Some(12),
+        ProcessColumnId::DiskRead  => Some(11),
+        ProcessColumnId::DiskWrite => Some(11),
+    }).sum();
+
+    let has_name = vis_cols.iter().any(|id| matches!(id, ProcessColumnId::Name));
+    let name_width = if has_name { inner_width.saturating_sub(fixed_total).max(18) } else { 0 };
+
+    let mut x = 0usize;
+    for id in vis_cols {
+        let w = match id {
+            ProcessColumnId::Name      => name_width,
+            ProcessColumnId::Pid       => 7,
+            ProcessColumnId::CpuPct    => 10,
+            ProcessColumnId::Mem       => 9,
+            ProcessColumnId::MemPct    => 6,
+            ProcessColumnId::Threads   => 5,
+            ProcessColumnId::Status    => 8,
+            ProcessColumnId::User      => 12,
+            ProcessColumnId::DiskRead  => 11,
+            ProcessColumnId::DiskWrite => 11,
+        };
+        if click_x >= x && click_x < x + w {
+            return match id {
+                ProcessColumnId::Pid       => Some(ProcessSortField::Pid),
+                ProcessColumnId::Name      => Some(ProcessSortField::Name),
+                ProcessColumnId::CpuPct    => Some(ProcessSortField::CpuPct),
+                ProcessColumnId::Mem       => Some(ProcessSortField::MemBytes),
+                ProcessColumnId::Threads   => Some(ProcessSortField::ThreadCount),
+                ProcessColumnId::DiskRead  => Some(ProcessSortField::DiskRead),
+                ProcessColumnId::DiskWrite => Some(ProcessSortField::DiskWrite),
+                _ => None,
+            };
+        }
+        x += w;
+    }
+    None
 }

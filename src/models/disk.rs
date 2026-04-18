@@ -1,5 +1,7 @@
+use crate::models::RingBuffer;
+
 /// Per-logical-drive I/O snapshot (one row per drive letter).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DiskSnapshot {
     /// Drive letter label, e.g. "C:" or "D:".
     pub drive: String,
@@ -13,4 +15,7 @@ pub struct DiskSnapshot {
     pub free_bytes: u64,
     /// Total capacity bytes on this drive.
     pub total_bytes: u64,
+    /// Rolling utilization % history for sparkline rendering.
+    pub util_history: RingBuffer<f32>,
 }
+
