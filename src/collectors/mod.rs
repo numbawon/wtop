@@ -1,9 +1,11 @@
 pub mod cpu;
 pub mod disk;
+pub mod gpu;
 pub mod inspect;
 pub mod memory;
 pub mod network;
 pub mod process;
+pub mod services;
 pub mod thread;
 
 use std::collections::HashMap;
@@ -11,9 +13,11 @@ use crate::config::Config;
 use crate::models::{
     cpu::CpuSnapshot,
     disk::DiskSnapshot,
+    gpu::GpuAdapter,
     memory::MemSnapshot,
     network::NetSnapshot,
     process::ProcessEntry,
+    services::ServiceEntry,
     thread::ThreadEntry,
 };
 use std::sync::{mpsc, Arc, RwLock};
@@ -27,11 +31,13 @@ pub struct CollectorHub {
     pub processes: Arc<RwLock<Vec<ProcessEntry>>>,
     pub disks: Arc<RwLock<Vec<DiskSnapshot>>>,
     pub networks: Arc<RwLock<Vec<NetSnapshot>>>,
+    pub gpus: Arc<RwLock<Vec<GpuAdapter>>>,
+    pub services: Arc<RwLock<Vec<ServiceEntry>>>,
     /// Send a PID here to request thread expansion.
     pub thread_request_tx: mpsc::Sender<u32>,
     /// Receive (pid, threads) results here.
     pub thread_result_rx: mpsc::Receiver<(u32, Vec<ThreadEntry>)>,
-    /// Handles for the five background collector threads.
+    /// Handles for the background collector threads.
     /// Used only to detect unexpected termination (panic).
     collector_handles: Vec<(&'static str, JoinHandle<()>)>,
 }
@@ -51,10 +57,13 @@ impl CollectorHub {
     pub fn spawn(config: &Config) -> Self {
         let cpu_state: Arc<RwLock<CpuSnapshot>> =
             Arc::new(RwLock::new(CpuSnapshot::new(config.cpu_history_len)));
-        let mem_state: Arc<RwLock<MemSnapshot>> = Arc::new(RwLock::default());
+        let mem_state: Arc<RwLock<MemSnapshot>> =
+            Arc::new(RwLock::new(MemSnapshot::new(config.cpu_history_len)));
         let proc_state: Arc<RwLock<Vec<ProcessEntry>>> = Arc::new(RwLock::new(Vec::new()));
         let disk_state: Arc<RwLock<Vec<DiskSnapshot>>> = Arc::new(RwLock::new(Vec::new()));
         let net_state: Arc<RwLock<Vec<NetSnapshot>>> = Arc::new(RwLock::new(Vec::new()));
+        let svc_state: Arc<RwLock<Vec<ServiceEntry>>> = Arc::new(RwLock::new(Vec::new()));
+        let gpu_state: Arc<RwLock<Vec<GpuAdapter>>> = Arc::new(RwLock::new(Vec::new()));
 
         let interval_ms = config.refresh_interval_ms;
         let history_len = config.cpu_history_len;
@@ -102,9 +111,26 @@ impl CollectorHub {
                 .spawn(move || {
                     let mut collector = memory::MemCollector::new();
                     loop {
-                        let snapshot = collector.collect();
+                        let snap = collector.collect();
                         if let Ok(mut s) = state.write() {
-                            *s = snapshot;
+                            let ram_pct = if snap.ram_total_bytes > 0 {
+                                (snap.ram_used_bytes as f32 / snap.ram_total_bytes as f32) * 100.0
+                            } else {
+                                0.0
+                            };
+                            let commit_pct = if snap.commit_limit_bytes > 0 {
+                                (snap.commit_total_bytes as f32 / snap.commit_limit_bytes as f32) * 100.0
+                            } else {
+                                0.0
+                            };
+                            s.ram_used_bytes = snap.ram_used_bytes;
+                            s.ram_total_bytes = snap.ram_total_bytes;
+                            s.swap_used_bytes = snap.swap_used_bytes;
+                            s.swap_total_bytes = snap.swap_total_bytes;
+                            s.commit_total_bytes = snap.commit_total_bytes;
+                            s.commit_limit_bytes = snap.commit_limit_bytes;
+                            s.ram_history.push(ram_pct);
+                            s.commit_history.push(commit_pct);
                         }
                         sleep_thread(Duration::from_millis(interval_ms));
                     }
@@ -181,8 +207,16 @@ impl CollectorHub {
                 .spawn(move || {
                     let mut collector = disk::DiskCollector::new();
                     loop {
-                        let snapshot = collector.collect();
+                        let mut snapshot = collector.collect();
                         if let Ok(mut s) = state.write() {
+                            for d in &mut snapshot {
+                                if let Some(existing) = s.iter().find(|e| e.drive == d.drive) {
+                                    d.util_history = existing.util_history.clone();
+                                } else {
+                                    d.util_history = crate::models::RingBuffer::new(history_len);
+                                }
+                                d.util_history.push(d.utilization_pct);
+                            }
                             *s = snapshot;
                         }
                         sleep_thread(Duration::from_millis(interval_ms));
@@ -210,12 +244,62 @@ impl CollectorHub {
             handles.push(("network", h));
         }
 
+        {
+            let state = Arc::clone(&svc_state);
+            let h = ThreadBuilder::new()
+                .name("wtop-services".into())
+                .spawn(move || {
+                    let collector = services::ServicesCollector::new();
+                    loop {
+                        let snapshot = collector.collect();
+                        if let Ok(mut s) = state.write() {
+                            *s = snapshot;
+                        }
+                        sleep_thread(Duration::from_millis(5000));
+                    }
+                })
+                .expect("failed to spawn services collector thread");
+            handles.push(("services", h));
+        }
+
+        {
+            let state = Arc::clone(&gpu_state);
+            let h = ThreadBuilder::new()
+                .name("wtop-gpu".into())
+                .spawn(move || {
+                    let mut collector = gpu::GpuCollector::new(history_len);
+                    loop {
+                        let snapshot = collector.collect(history_len);
+                        if let Ok(mut s) = state.write() {
+                            // Preserve per-GPU history across snapshots.
+                            for (i, adapter) in snapshot.iter().enumerate() {
+                                if let Some(existing) = s.get_mut(i) {
+                                    existing.vram_used_bytes = adapter.vram_used_bytes;
+                                    existing.utilization_pct = adapter.utilization_pct;
+                                    existing.util_history.push(adapter.utilization_pct);
+                                } else {
+                                    s.push(adapter.clone());
+                                    if let Some(a) = s.last_mut() {
+                                        a.util_history.push(a.utilization_pct);
+                                    }
+                                }
+                            }
+                        }
+                        sleep_thread(Duration::from_millis(interval_ms));
+                    }
+                })
+                .expect("failed to spawn gpu collector thread");
+            handles.push(("gpu", h));
+        }
+
         Self {
             cpu: cpu_state,
             memory: mem_state,
             processes: proc_state,
             disks: disk_state,
             networks: net_state,
+            gpus: gpu_state,
+            services: svc_state,
             thread_request_tx: thread_req_tx,
             thread_result_rx: thread_res_rx,
             collector_handles: handles,

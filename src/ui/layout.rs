@@ -9,12 +9,14 @@ pub struct LayoutRects {
     pub disk: Option<Rect>,
     /// `None` when the Network panel is hidden by the user.
     pub network: Option<Rect>,
+    /// `None` when the GPU panel is hidden or no GPU detected.
+    pub gpu: Option<Rect>,
     pub processes: Rect,
     pub statusbar: Rect,
 }
 
 /// Compute layout rects based on the active `LayoutMode` and panel visibility.
-pub fn compute(area: Rect, mode: &LayoutMode, show_disk: bool, show_network: bool) -> LayoutRects {
+pub fn compute(area: Rect, mode: &LayoutMode, show_disk: bool, show_network: bool, show_gpu: bool) -> LayoutRects {
     // Reserve bottom 1 row for the status/keybindings bar.
     let outer = Layout::default()
         .direction(Direction::Vertical)
@@ -27,114 +29,87 @@ pub fn compute(area: Rect, mode: &LayoutMode, show_disk: bool, show_network: boo
     match mode {
         LayoutMode::Auto => {
             if area.width >= 160 {
-                layout_wide(main_area, statusbar, show_disk, show_network)
+                layout_wide(main_area, statusbar, show_disk, show_network, show_gpu)
             } else if area.width >= 100 {
-                layout_stacked(main_area, statusbar, 8, 5, 4, 4, show_disk, show_network)
+                layout_stacked(main_area, statusbar, 8, 5, 4, 4, 4, show_disk, show_network, show_gpu)
             } else {
-                layout_stacked(main_area, statusbar, 6, 4, 3, 3, show_disk, show_network)
+                layout_stacked(main_area, statusbar, 6, 4, 3, 3, 3, show_disk, show_network, show_gpu)
             }
         }
         LayoutMode::Compact => {
-            layout_stacked(main_area, statusbar, 5, 3, 3, 3, show_disk, show_network)
+            layout_stacked(main_area, statusbar, 5, 3, 3, 3, 3, show_disk, show_network, show_gpu)
         }
         LayoutMode::Wide => {
-            layout_wide(main_area, statusbar, show_disk, show_network)
+            layout_wide(main_area, statusbar, show_disk, show_network, show_gpu)
         }
         LayoutMode::Stacked => {
-            layout_stacked(main_area, statusbar, 6, 3, 3, 3, show_disk, show_network)
+            layout_stacked(main_area, statusbar, 6, 3, 3, 3, 3, show_disk, show_network, show_gpu)
         }
     }
 }
 
-/// Wide layout: CPU and Memory stacked on top, Disk|Net side-by-side in the middle, Processes at bottom.
-fn layout_wide(area: Rect, statusbar: Rect, show_disk: bool, show_network: bool) -> LayoutRects {
-    match (show_disk, show_network) {
-        (true, true) => {
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(8),
-                    Constraint::Length(5),
-                    Constraint::Length(6),
-                    Constraint::Min(10),
-                ])
-                .split(area);
+/// Wide layout: CPU+Memory stacked on top, Disk|Net side-by-side in the middle,
+/// GPU below that, Processes at bottom.
+#[allow(clippy::too_many_arguments)]
+fn layout_wide(
+    area: Rect,
+    statusbar: Rect,
+    show_disk: bool,
+    show_network: bool,
+    show_gpu: bool,
+) -> LayoutRects {
+    let show_mid = show_disk || show_network;
 
-            let middle = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(rows[2]);
+    let mut v_constraints: Vec<Constraint> = vec![
+        Constraint::Length(8),
+        Constraint::Length(5),
+    ];
+    if show_mid  { v_constraints.push(Constraint::Length(6)); }
+    if show_gpu  { v_constraints.push(Constraint::Length(4)); }
+    v_constraints.push(Constraint::Min(10));
 
-            LayoutRects {
-                cpu: rows[0],
-                memory: rows[1],
-                disk: Some(middle[0]),
-                network: Some(middle[1]),
-                processes: rows[3],
-                statusbar,
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(v_constraints)
+        .split(area);
+
+    let mut idx = 2usize;
+
+    let (disk_rect, net_rect) = if show_mid {
+        let mid_row = rows[idx];
+        idx += 1;
+        match (show_disk, show_network) {
+            (true, true) => {
+                let halves = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(mid_row);
+                (Some(halves[0]), Some(halves[1]))
             }
+            (true, false) => (Some(mid_row), None),
+            (false, true) => (None, Some(mid_row)),
+            (false, false) => (None, None),
         }
-        (true, false) => {
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(8),
-                    Constraint::Length(5),
-                    Constraint::Length(6),
-                    Constraint::Min(10),
-                ])
-                .split(area);
-            LayoutRects {
-                cpu: rows[0],
-                memory: rows[1],
-                disk: Some(rows[2]),
-                network: None,
-                processes: rows[3],
-                statusbar,
-            }
-        }
-        (false, true) => {
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(8),
-                    Constraint::Length(5),
-                    Constraint::Length(6),
-                    Constraint::Min(10),
-                ])
-                .split(area);
-            LayoutRects {
-                cpu: rows[0],
-                memory: rows[1],
-                disk: None,
-                network: Some(rows[2]),
-                processes: rows[3],
-                statusbar,
-            }
-        }
-        (false, false) => {
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(8),
-                    Constraint::Length(5),
-                    Constraint::Min(10),
-                ])
-                .split(area);
-            LayoutRects {
-                cpu: rows[0],
-                memory: rows[1],
-                disk: None,
-                network: None,
-                processes: rows[2],
-                statusbar,
-            }
-        }
+    } else {
+        (None, None)
+    };
+
+    let gpu_rect = if show_gpu { let r = rows[idx]; idx += 1; Some(r) } else { None };
+    let proc_rect = rows[idx];
+
+    LayoutRects {
+        cpu: rows[0],
+        memory: rows[1],
+        disk: disk_rect,
+        network: net_rect,
+        gpu: gpu_rect,
+        processes: proc_rect,
+        statusbar,
     }
 }
 
 /// Generic stacked (single-column) layout with configurable panel heights.
-/// Omits disk/network rows when hidden, giving that space to processes.
+/// Omits disk/network/gpu rows when hidden, giving that space to processes.
 #[allow(clippy::too_many_arguments)]
 fn layout_stacked(
     area: Rect,
@@ -143,8 +118,10 @@ fn layout_stacked(
     mem_h: u16,
     disk_h: u16,
     net_h: u16,
+    gpu_h: u16,
     show_disk: bool,
     show_network: bool,
+    show_gpu: bool,
 ) -> LayoutRects {
     let mut constraints: Vec<Constraint> = vec![
         Constraint::Length(cpu_h),
@@ -152,6 +129,7 @@ fn layout_stacked(
     ];
     if show_disk    { constraints.push(Constraint::Length(disk_h)); }
     if show_network { constraints.push(Constraint::Length(net_h)); }
+    if show_gpu     { constraints.push(Constraint::Length(gpu_h)); }
     constraints.push(Constraint::Min(6));
 
     let rows = Layout::default()
@@ -162,6 +140,7 @@ fn layout_stacked(
     let mut idx = 2usize;
     let disk_rect = if show_disk    { let r = rows[idx]; idx += 1; Some(r) } else { None };
     let net_rect  = if show_network { let r = rows[idx]; idx += 1; Some(r) } else { None };
+    let gpu_rect  = if show_gpu     { let r = rows[idx]; idx += 1; Some(r) } else { None };
     let proc_rect = rows[idx];
 
     LayoutRects {
@@ -169,6 +148,7 @@ fn layout_stacked(
         memory: rows[1],
         disk: disk_rect,
         network: net_rect,
+        gpu: gpu_rect,
         processes: proc_rect,
         statusbar,
     }

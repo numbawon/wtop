@@ -11,7 +11,7 @@ use crate::config::ProcessColumnId;
 use crate::ui::theme::Theme;
 
 /// Total number of selectable settings items.
-pub const SETTINGS_COUNT: usize = 13;
+pub const SETTINGS_COUNT: usize = 24;
 
 enum RowKind {
     Header,
@@ -43,7 +43,7 @@ impl SettingRow {
 
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let width  = 58u16.min(area.width);
-    let height = 22u16.min(area.height);
+    let height = 36u16.min(area.height);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);
@@ -78,6 +78,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         SettingRow::header("── Panels"),
         SettingRow::item("  Disk Panel",         shown_hidden(state.config.show_disk),                          4),
         SettingRow::item("  Network Panel",      shown_hidden(state.config.show_network),                       5),
+        SettingRow::item("  GPU Panel",          shown_hidden(state.config.show_gpu),                           23),
         SettingRow::item("  Disk I/O Columns",   shown_hidden(disk_io_shown),                                   6),
         SettingRow::header("── Processes"),
         SettingRow::item("  System Processes",   shown_hidden(state.config.show_system_processes),              7),
@@ -88,6 +89,17 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         SettingRow::header("── General"),
         SettingRow::item("  Refresh Interval",   format!("{}ms", state.config.refresh_interval_ms),            10),
         SettingRow::item("  Clock Format",       if state.config.time_24h { "24h".into() } else { "12h AM/PM".into() }, 11),
+        SettingRow::header("── Columns"),
+        SettingRow::item("  PID",    col_vis(state, ProcessColumnId::Pid),       13),
+        SettingRow::item("  NAME",   col_vis(state, ProcessColumnId::Name),      14),
+        SettingRow::item("  CPU%",   col_vis(state, ProcessColumnId::CpuPct),    15),
+        SettingRow::item("  MEM",    col_vis(state, ProcessColumnId::Mem),       16),
+        SettingRow::item("  MEM%",   col_vis(state, ProcessColumnId::MemPct),    17),
+        SettingRow::item("  THDS",   col_vis(state, ProcessColumnId::Threads),   18),
+        SettingRow::item("  STATUS", col_vis(state, ProcessColumnId::Status),    19),
+        SettingRow::item("  USER",   col_vis(state, ProcessColumnId::User),      20),
+        SettingRow::item("  DISK-R", col_vis(state, ProcessColumnId::DiskRead),  21),
+        SettingRow::item("  DISK-W", col_vis(state, ProcessColumnId::DiskWrite), 22),
         SettingRow::spacer(),
         SettingRow::hint("  ↑↓ nav  ←→/Enter change  Esc close", ""),
     ]);
@@ -132,6 +144,11 @@ fn shorten_url(url: &str) -> &str {
     url.trim_start_matches("https://")
        .trim_start_matches("http://")
        .trim_start_matches("www.")
+}
+
+fn col_vis(state: &AppState, id: ProcessColumnId) -> String {
+    let visible = state.config.process_columns.iter().any(|c| c.id == id && c.visible);
+    shown_hidden(visible)
 }
 
 fn on_off(v: bool)       -> String { if v { "On".into()     } else { "Off".into()    } }

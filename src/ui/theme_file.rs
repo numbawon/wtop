@@ -307,8 +307,6 @@ pub struct ThemeColors {
     pub title:            Option<String>,
     pub header:           Option<String>,
 
-    pub gauge_low:        Option<String>,
-    pub gauge_medium:     Option<String>,
     pub gauge_high:       Option<String>,
 
     /// If set, applied as the background of normal / thread / suspicious / spike
@@ -335,9 +333,6 @@ pub struct ThemeColors {
     pub text_normal:      Option<String>,
     pub text_bright:      Option<String>,
 
-    pub spark_low:        Option<String>,
-    pub spark_mid:        Option<String>,
-    pub spark_high:       Option<String>,
 }
 
 // ── ThemeFile → Theme conversion ──────────────────────────────────────────────
@@ -414,9 +409,7 @@ impl From<ThemeFile> for Theme {
             header:         Style::default().fg(resolve(&c.header,         Color::Yellow))
                                             .add_modifier(Modifier::BOLD),
 
-            gauge_low:    Style::default().fg(resolve(&c.gauge_low,    Color::Green)),
-            gauge_medium: Style::default().fg(resolve(&c.gauge_medium, Color::Yellow)),
-            gauge_high:   Style::default().fg(resolve(&c.gauge_high,   Color::Red)),
+            gauge_high: Style::default().fg(resolve(&c.gauge_high, Color::Red)),
 
             row_normal:    with_row_bg(Style::default().fg(resolve(&c.row_normal_fg,   Color::White))),
             row_zebra:     Style::default()
@@ -456,10 +449,6 @@ impl From<ThemeFile> for Theme {
             panel_bg,
             border_set,
             gauge_style,
-
-            spark_low:  resolve(&c.spark_low,  Color::Green),
-            spark_mid:  resolve(&c.spark_mid,  Color::Yellow),
-            spark_high: resolve(&c.spark_high, Color::Red),
             spark_chars,
         }
     }

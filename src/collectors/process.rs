@@ -54,6 +54,7 @@ impl ProcessCollector {
         self.sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
         let total_memory = self.sys.total_memory().max(1);
+        let logical_cpus = self.sys.cpus().len().max(1) as f32;
         let thread_counts = count_threads_by_pid();
 
         // Resolve user arcs before building entries (can't borrow both cache maps
@@ -90,7 +91,7 @@ impl ProcessCollector {
             .map(|p| {
                 let pid = p.pid().as_u32();
                 let mem = p.memory();
-                let cpu_pct = p.cpu_usage();
+                let cpu_pct = (p.cpu_usage() / logical_cpus).clamp(0.0, 100.0);
                 let mem_pct_display = mem as f32 / total_memory as f32 * 100.0;
                 let thread_count = *thread_counts.get(&pid).unwrap_or(&0);
                 let disk_usage = p.disk_usage();

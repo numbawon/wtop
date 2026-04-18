@@ -16,6 +16,8 @@ pub struct Glyphs {
     pub disk_icon: &'static str,
     /// Prefix for the Network panel title.
     pub net_icon: &'static str,
+    /// Prefix for the GPU panel title.
+    pub gpu_icon: &'static str,
     /// Prefix for the Processes panel title.
     pub proc_icon: &'static str,
 
@@ -46,6 +48,7 @@ impl Glyphs {
             mem_icon: "",
             disk_icon: "",
             net_icon: "",
+            gpu_icon: "",
             proc_icon: "",
             expand_open: "▼",
             expand_closed: "▶",
@@ -77,6 +80,7 @@ impl Glyphs {
             mem_icon:     "\u{f538} ",
             disk_icon:    "\u{f0a0} ",
             net_icon:     "\u{f1eb} ",
+            gpu_icon:     "\u{f878} ",
             proc_icon:    "\u{f085} ",
             expand_open:  "\u{f078}",
             expand_closed: "\u{f054}",

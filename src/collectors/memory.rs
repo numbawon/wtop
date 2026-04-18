@@ -1,4 +1,5 @@
 use crate::models::memory::MemSnapshot;
+use crate::models::RingBuffer;
 use sysinfo::System;
 use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
@@ -31,6 +32,8 @@ impl MemCollector {
             swap_total_bytes: swap_total,
             commit_total_bytes: commit_total,
             commit_limit_bytes: commit_limit,
+            ram_history: RingBuffer::new(0),
+            commit_history: RingBuffer::new(0),
         }
     }
 

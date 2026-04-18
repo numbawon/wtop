@@ -15,10 +15,8 @@ pub struct Theme {
     pub title: Style,
     pub header: Style,
 
-    // Gauge / bar fills
-    pub gauge_low: Style,     // 0–60%
-    pub gauge_medium: Style,  // 60–85%
-    pub gauge_high: Style,    // 85–100%
+    /// Semantic danger/error style - used for kill confirm, error messages.
+    pub gauge_high: Style,
 
     // Process table
     pub row_normal: Style,
@@ -52,31 +50,39 @@ pub struct Theme {
     /// How CPU / memory gauge bars are rendered.
     pub gauge_style: GaugeStyle,
 
-    /// Sparkline gradient - low / mid / high fill colours.
-    pub spark_low:  Color,
-    pub spark_mid:  Color,
-    pub spark_high: Color,
     /// Block characters for the sparkline (Unicode or ASCII fallback).
     pub spark_chars: &'static [&'static str],
+}
+
+/// 8-band heat gradient: dark blue (idle) → deep red/crimson (max load).
+///
+/// Bands (each ~12.5 pp):
+///   0–12 %  Dark Blue     13–25 %  Cyan/Light Blue
+///  26–37 %  Green         38–50 %  Yellow-Green
+///  51–62 %  Yellow/Gold   63–75 %  Orange
+///  76–87 %  Red-Orange    88–100 % Deep Red/Crimson
+pub fn heat_color(pct: f64) -> Color {
+    match pct as u8 {
+        0..=12  => Color::Rgb(  0,  80, 200),
+        13..=25 => Color::Rgb(  0, 190, 230),
+        26..=37 => Color::Rgb(  0, 200, 100),
+        38..=50 => Color::Rgb(140, 220,   0),
+        51..=62 => Color::Rgb(255, 220,   0),
+        63..=75 => Color::Rgb(255, 140,   0),
+        76..=87 => Color::Rgb(255,  50,   0),
+        _       => Color::Rgb(180,   0,  30),
+    }
 }
 
 impl Theme {
     /// Gradient colour for the sparkline bar at the given percentage (0–100).
     pub fn spark_color(&self, pct: f64) -> Color {
-        if pct >= 85.0 { self.spark_high }
-        else if pct >= 60.0 { self.spark_mid }
-        else { self.spark_low }
+        heat_color(pct)
     }
 
     /// Pick a gauge style based on percentage (0–100).
     pub fn gauge_for_pct(&self, pct: f64) -> Style {
-        if pct >= 85.0 {
-            self.gauge_high
-        } else if pct >= 60.0 {
-            self.gauge_medium
-        } else {
-            self.gauge_low
-        }
+        Style::default().fg(heat_color(pct))
     }
 
     // ── Compiled-in fallback ──────────────────────────────────────────────────
@@ -88,9 +94,7 @@ impl Theme {
             title:          Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             header:         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
 
-            gauge_low:    Style::default().fg(Color::Green),
-            gauge_medium: Style::default().fg(Color::Yellow),
-            gauge_high:   Style::default().fg(Color::Red),
+            gauge_high: Style::default().fg(Color::Red),
 
             row_normal:    Style::default().fg(Color::White),
             row_zebra:     Style::default().fg(Color::White).bg(Color::Rgb(22, 22, 32)),
@@ -113,9 +117,6 @@ impl Theme {
             panel_bg:   Style::default(),
             border_set: symbols::border::PLAIN,
             gauge_style: GaugeStyle::Block,
-            spark_low:  Color::Green,
-            spark_mid:  Color::Yellow,
-            spark_high: Color::Red,
             spark_chars: SPARK_CHARS,
         }
     }
@@ -133,9 +134,7 @@ impl Theme {
             title:          bold,
             header:         bold,
 
-            gauge_low:    normal,
-            gauge_medium: normal,
-            gauge_high:   bold,
+            gauge_high: bold,
 
             row_normal:    normal,
             row_zebra:     normal,
@@ -167,9 +166,6 @@ impl Theme {
             },
             panel_bg:    Style::default(),
             gauge_style: GaugeStyle::Ascii,
-            spark_low:   Color::Reset,
-            spark_mid:   Color::Reset,
-            spark_high:  Color::Reset,
             spark_chars: ASCII_SPARK_CHARS,
         }
     }

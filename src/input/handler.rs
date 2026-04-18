@@ -15,6 +15,7 @@ pub struct ModalState {
     pub net_filter_active: bool,
     pub help_active: bool,
     pub name_search_active: bool,
+    pub services_active: bool,
 }
 
 /// All actions the UI can dispatch in response to key events.
@@ -84,6 +85,15 @@ pub enum AppAction {
     NameSearchBackspace,
     NameSearchConfirm,
     NameSearchCancel,
+    ToggleGpu,
+    ToggleServices,
+    ServicesUp,
+    ServicesDown,
+    ServicesPageUp,
+    ServicesPageDown,
+    ServicesFilterChar(char),
+    ServicesFilterBackspace,
+    ServicesFilterClear,
     None,
 }
 
@@ -196,6 +206,21 @@ pub fn handle_key(key: KeyEvent, m: &ModalState) -> AppAction {
         };
     }
 
+    // When the services panel is open.
+    if m.services_active {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('v') => AppAction::ToggleServices,
+            KeyCode::Up                       => AppAction::ServicesUp,
+            KeyCode::Down                     => AppAction::ServicesDown,
+            KeyCode::PageUp                   => AppAction::ServicesPageUp,
+            KeyCode::PageDown                 => AppAction::ServicesPageDown,
+            KeyCode::Backspace                => AppAction::ServicesFilterBackspace,
+            KeyCode::Delete                   => AppAction::ServicesFilterClear,
+            KeyCode::Char(c)                  => AppAction::ServicesFilterChar(c),
+            _ => AppAction::None,
+        };
+    }
+
     // When the filter bar is open, most keys feed into the search string.
     if m.filter_active {
         return match key.code {
@@ -230,7 +255,8 @@ pub fn handle_key(key: KeyEvent, m: &ModalState) -> AppAction {
         (_, KeyCode::Char('-')) => AppAction::DecreaseRefresh,
         (_, KeyCode::Char('?')) | (_, KeyCode::Char('h')) => AppAction::ToggleHelp,
         (KeyModifiers::CONTROL, KeyCode::Char('g')) => AppAction::OpenPidJump,
-        (_, KeyCode::Char('g')) => AppAction::ToggleNerdGlyphs,
+        (KeyModifiers::NONE, KeyCode::Char('g')) => AppAction::ToggleNerdGlyphs,
+        (KeyModifiers::SHIFT, KeyCode::Char('g')) => AppAction::ToggleGpu,
         (KeyModifiers::SHIFT, KeyCode::Char('T')) => AppAction::CycleTheme,
         (KeyModifiers::SHIFT, KeyCode::Char('L')) => AppAction::CycleLayout,
         (_, KeyCode::Char('d')) => AppAction::ToggleDisk,
@@ -241,6 +267,7 @@ pub fn handle_key(key: KeyEvent, m: &ModalState) -> AppAction {
         (_, KeyCode::Char('i')) => AppAction::ToggleInspect,
         (_, KeyCode::Char('t')) => AppAction::ToggleTreeView,
         (_, KeyCode::Char('/')) => AppAction::OpenNameSearch,
+        (_, KeyCode::Char('v')) => AppAction::ToggleServices,
         _ => AppAction::None,
     }
 }

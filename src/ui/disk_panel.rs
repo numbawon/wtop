@@ -1,6 +1,7 @@
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Constraint, Rect},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Row, Table},
     Frame,
@@ -8,7 +9,6 @@ use ratatui::{
 
 use crate::glyphs::Glyphs;
 use crate::models::disk::DiskSnapshot;
-use crate::ui::gauge_bar::build_block_bar;
 use crate::ui::theme::Theme;
 
 pub fn render(
@@ -55,12 +55,7 @@ pub fn render(
             .iter()
             .map(|d| {
                 let util = d.utilization_pct as f64;
-                let bar = build_block_bar(util / 100.0, 8);
-                let util_style = theme.gauge_for_pct(util);
-                let util_cell = Cell::from(Line::from(vec![
-                    Span::styled(bar, util_style),
-                    Span::styled(format!(" {:4.1}%", d.utilization_pct), theme.row_normal),
-                ]));
+                let util_cell = Cell::from(build_spark_line(d, util, theme));
 
                 let mut cells = vec![
                     Cell::from(d.drive.clone()),
@@ -90,10 +85,10 @@ pub fn render(
     };
 
     let mut constraints = vec![
-        Constraint::Min(4),     // drive letter - expands to fill available space
+        Constraint::Min(4),     // drive letter
         Constraint::Length(10), // READ/s
         Constraint::Length(10), // WRITE/s
-        Constraint::Length(13), // 8 bar + 1 space + " XX.X%"
+        Constraint::Length(14), // 8 spark + 1 space + " XX.X%"
     ];
     if show_free {
         constraints.push(Constraint::Length(9)); // FREE
@@ -113,4 +108,26 @@ pub fn render(
         );
 
     frame.render_widget(table, area);
+}
+
+/// Build a Line showing last-8 utilization sparkline + current percentage.
+fn build_spark_line<'a>(d: &DiskSnapshot, util: f64, theme: &'a Theme) -> Line<'a> {
+    let history = &d.util_history.data;
+    let spark_len = 8usize;
+    let offset = history.len().saturating_sub(spark_len);
+
+    let mut spans: Vec<Span<'a>> = (0..spark_len)
+        .map(|i| {
+            let v = history.get(offset + i).copied().unwrap_or(0.0) as f64;
+            let idx = ((v / 100.0) * 8.0).round().clamp(0.0, 8.0) as usize;
+            Span::styled(theme.spark_chars[idx], Style::default().fg(theme.spark_color(v)))
+        })
+        .collect();
+
+    spans.push(Span::styled(
+        format!(" {:4.1}%", util),
+        theme.gauge_for_pct(util),
+    ));
+
+    Line::from(spans)
 }
