@@ -23,10 +23,10 @@ pub fn render(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_set(theme.border_set.clone())
+        .border_set(theme.border_set)
         .border_style(border_style)
         .title(Span::styled(
-            format!(" {}CPU — {} ", glyphs.cpu_icon, snapshot.brand),
+            format!(" {}CPU - {} ", glyphs.cpu_icon, snapshot.brand),
             theme.title,
         ));
 
@@ -37,7 +37,6 @@ pub fn render(
         return;
     }
 
-    // Split inner area: top portion for core bars, bottom row for sparkline.
     let sparkline_height = 2u16;
     if inner.height <= sparkline_height {
         return;
@@ -75,7 +74,7 @@ fn render_core_bars(
     let max_cols_by_width = (area.width / min_bar_width).max(1) as usize;
     let max_rows = area.height as usize;
     let cols = best_col_count(core_count, max_cols_by_width, max_rows);
-    let rows = (core_count + cols - 1) / cols;
+    let rows = core_count.div_ceil(cols);
 
     let row_constraints: Vec<Constraint> = (0..rows)
         .map(|_| Constraint::Length(1))
@@ -131,17 +130,17 @@ fn best_col_count(core_count: usize, max_by_width: usize, max_rows: usize) -> us
 
     // Iterate largest → smallest; stop as soon as we find a perfect divisor.
     for c in (1..=cap).rev() {
-        let rows_needed = (core_count + c - 1) / c;
+        let rows_needed = core_count.div_ceil(c);
         if rows_needed > max_rows {
             continue;
         }
-        let orphans = if core_count % c == 0 { 0 } else { c - (core_count % c) };
+        let orphans = if core_count.is_multiple_of(c) { 0 } else { c - (core_count % c) };
         if orphans < best_orphans {
             best_cols = c;
             best_orphans = orphans;
         }
         if best_orphans == 0 {
-            break; // perfect even grid found — no need to check smaller
+            break; // perfect even grid found - no need to check smaller
         }
     }
 
@@ -157,7 +156,6 @@ fn render_sparkline(
     let history = &snapshot.aggregate_history.data;
     let label = format!("Aggregate {:>5.1}%", snapshot.aggregate_pct);
 
-    // Render the label as the block title; the bar fills the 1-row inner area.
     let block = Block::default()
         .title(Span::styled(label, theme.text_dim));
     let inner = block.inner(area);
@@ -170,7 +168,6 @@ fn render_sparkline(
     let w = inner.width as usize;
     let offset = history.len().saturating_sub(w);
 
-    // Build a row of per-value-coloured block-element spans.
     let spans: Vec<Span> = (0..w)
         .map(|col| {
             let v = history.get(offset + col).copied().unwrap_or(0.0) as u64;

@@ -37,6 +37,13 @@ pub fn render(
     let total = processes.len();
     let shown = visible.len();
 
+    // In tree mode build depth map for each visible process
+    let depths: Vec<usize> = if state.config.tree_view {
+        compute_depths(&visible)
+    } else {
+        vec![0usize; shown]
+    };
+
     // Collect visible columns in order.
     let cols: Vec<&ProcessColumnId> = state.config.process_columns
         .iter()
@@ -54,16 +61,34 @@ pub fn render(
 
     let mut rows: Vec<Row> = Vec::new();
 
-    for (proc_idx, proc) in visible.iter().enumerate() {
-        let is_selected = proc_idx == state.process_cursor;
+    // display_indices: for each display row, which visible[] index to show
+    let display_indices: Vec<usize> = if state.config.tree_view && !state.tree_display_order.is_empty() {
+        state.tree_display_order.clone()
+    } else {
+        (0..shown).collect()
+    };
+
+    for (display_row, &vi) in display_indices.iter().enumerate() {
+        let proc = match visible.get(vi) {
+            Some(p) => *p,
+            None => continue,
+        };
+        let is_selected = display_row == state.process_cursor;
         let row_style = if is_selected {
             theme.row_selected
         } else if state.cpu_spike_flash.contains_key(&proc.pid) {
             theme.row_spike
-        } else if proc_idx % 2 == 1 {
+        } else if display_row % 2 == 1 {
             theme.row_zebra
         } else {
             theme.row_normal
+        };
+
+        let depth = depths.get(vi).copied().unwrap_or(0);
+        let tree_prefix = if state.config.tree_view && depth > 0 {
+            format!("{}{} ", "  ".repeat(depth - 1), "└")
+        } else {
+            String::new()
         };
 
         let expand_marker = if proc.expanded {
@@ -76,7 +101,7 @@ pub fn render(
 
         let cells: Vec<Cell> = cols
             .iter()
-            .map(|id| build_cell(id, proc, expand_marker, row_style, theme))
+            .map(|id| build_cell_tree(id, proc, expand_marker, &tree_prefix, row_style, theme))
             .collect();
 
         rows.push(Row::new(cells).style(row_style));
@@ -128,7 +153,7 @@ pub fn render(
                             }
                         }
                         ProcessColumnId::Status => {
-                            // Kernel CPU time — most useful for spotting syscall-heavy threads.
+                            // Kernel CPU time - most useful for spotting syscall-heavy threads.
                             Cell::from(format_kernel_time(thread.kernel_ms))
                         }
                         ProcessColumnId::User => {
@@ -157,10 +182,11 @@ pub fn render(
         state.sort_state.field.label(),
         if state.sort_state.ascending { "▲" } else { "▼" }
     );
+    let tree_label = if state.config.tree_view { " [Tree] " } else { "" };
 
     let title = format!(
-        " {}Processes  {}  Total:{} Shown:{} ",
-        glyphs.proc_icon, sort_label, total, shown
+        " {}Processes  {}{}  Total:{} Shown:{} ",
+        glyphs.proc_icon, sort_label, tree_label, total, shown
     );
 
     let table = Table::new(rows, constraints)
@@ -168,7 +194,7 @@ pub fn render(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_set(theme.border_set.clone())
+                .border_set(theme.border_set)
                 .border_style(border_style)
                 .title(Span::styled(title, theme.title)),
         )
@@ -179,6 +205,22 @@ pub fn render(
     table_state.select(Some(state.process_cursor));
 
     frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn build_cell_tree<'a>(
+    id: &ProcessColumnId,
+    proc: &'a ProcessEntry,
+    expand_marker: &str,
+    tree_prefix: &str,
+    row_style: Style,
+    theme: &'a Theme,
+) -> Cell<'a> {
+    match id {
+        ProcessColumnId::Name => Cell::from(
+            format!("{}{} {}", tree_prefix, expand_marker, proc.name)
+        ),
+        _ => build_cell(id, proc, expand_marker, row_style, theme),
+    }
 }
 
 fn build_cell<'a>(
@@ -258,4 +300,31 @@ fn format_kernel_time(ms: u64) -> String {
     } else {
         format!("K:{}s", ms / 1_000)
     }
+}
+
+/// Compute tree depth for each visible process (index = position in visible list).
+/// Depth 0 = root, depth 1 = child, etc.
+fn compute_depths(visible: &[&ProcessEntry]) -> Vec<usize> {
+    use std::collections::HashMap;
+    let pid_to_vi: HashMap<u32, usize> = visible.iter().enumerate()
+        .map(|(i, p)| (p.pid, i))
+        .collect();
+
+    let mut depths = vec![0usize; visible.len()];
+    for (i, p) in visible.iter().enumerate() {
+        let mut depth = 0usize;
+        let mut cur_pid = p.parent_pid;
+        let mut visited = std::collections::HashSet::new();
+        while cur_pid > 0 {
+            if !visited.insert(cur_pid) { break; }
+            if let Some(&pi) = pid_to_vi.get(&cur_pid) {
+                depth += 1;
+                cur_pid = visible[pi].parent_pid;
+            } else {
+                break;
+            }
+        }
+        depths[i] = depth;
+    }
+    depths
 }

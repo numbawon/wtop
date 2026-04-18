@@ -1,4 +1,5 @@
 mod app;
+mod clipboard;
 mod collectors;
 mod config;
 mod glyphs;
@@ -11,7 +12,7 @@ use clap::Parser;
 use config::Config;
 use tracing_subscriber::EnvFilter;
 
-/// wtop — Windows terminal system monitor
+/// wtop - Windows terminal system monitor
 #[derive(Parser, Debug)]
 #[command(name = "wtop", about = "htop-style system monitor for Windows")]
 struct Args {
@@ -53,12 +54,10 @@ fn main() -> anyhow::Result<()> {
 
     init_logging(&args.log_level)?;
 
-    // Handle informational flags that print and exit before starting the UI.
     if args.list_themes {
         let themes = ui::theme_file::available_themes();
         for slug in &themes {
             let r = ui::theme_file::load_theme(slug);
-            // slug  Name  Author  Description  Homepage
             let author_ver = match (r.author.as_deref(), r.version.as_deref()) {
                 (Some(a), Some(v)) => format!("{a} (v{v})"),
                 (Some(a), None)    => a.to_string(),
@@ -81,14 +80,12 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Start from saved config, then let CLI flags override.
     let mut config = Config::load();
 
     if let Some(ms) = args.interval {
         config.refresh_interval_ms = ms.clamp(250, 5000);
     }
     if let Some(ref theme) = args.theme {
-        // Accept any slug — theme_file::load_theme normalises aliases.
         config.theme = theme.to_lowercase();
     }
     if args.nerd_glyphs    { config.nerd_glyphs = true; }
@@ -96,7 +93,6 @@ fn main() -> anyhow::Result<()> {
     if args.ascii          { config.ascii_mode = true; }
     if std::env::var("NO_COLOR").is_ok() { config.ascii_mode = true; }
 
-    // Auto-enable Nerd Glyphs inside Windows Terminal if not explicitly set.
     if !args.nerd_glyphs && !args.no_nerd_glyphs && std::env::var("WT_SESSION").is_ok() {
         config.nerd_glyphs = true;
     }

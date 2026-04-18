@@ -13,7 +13,7 @@ const PDH_MORE_DATA: u32 = 0x800007D2;
 ///
 /// Uses \LogicalDisk(*)\  counters so each drive letter (C:, D:, …) appears
 /// as its own row.  PDH rate counters need two `PdhCollectQueryData` calls
-/// before they return meaningful bytes/sec values — we prime the first sample
+/// before they return meaningful bytes/sec values - we prime the first sample
 /// in `new()`, so the first call to `collect()` already returns valid rates.
 pub struct DiskCollector {
     query: isize,

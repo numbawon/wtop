@@ -20,10 +20,34 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Threading::GetCurrentProcess;
 use chrono::Local;
-use crate::input::handler::{handle_key, AppAction};
+use crate::input::handler::{handle_key, AppAction, ModalState};
 use crate::models::process::{sort_processes, SortState};
 use crate::models::inspect::ProcessInspectData;
 use crate::wt::WtInfo;
+
+/// Which tab is active inside the inspect overlay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectTab {
+    Info,
+    Threads,
+    Modules,
+    Handles,
+    Network,
+    Env,
+}
+
+impl InspectTab {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Info    => Self::Threads,
+            Self::Threads => Self::Modules,
+            Self::Modules => Self::Handles,
+            Self::Handles => Self::Network,
+            Self::Network => Self::Env,
+            Self::Env     => Self::Info,
+        }
+    }
+}
 
 /// Which panel has keyboard focus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,11 +89,11 @@ pub struct AppState {
     pub sort_state: SortState,
     pub filter_active: bool,
     pub filter_text: String,
-    /// Lowercase cache of `filter_text` — updated on every keystroke, not per-process per-frame.
+    /// Lowercase cache of `filter_text` - updated on every keystroke, not per-process per-frame.
     pub filter_text_lower: String,
     pub show_system_processes: bool,
     pub user_filter_active: bool,
-    /// Lowercase username — computed once at startup for filter comparisons.
+    /// Lowercase username - computed once at startup for filter comparisons.
     pub current_user_lower: String,
     pub show_help: bool,
     pub show_kill_confirm: bool,
@@ -101,7 +125,7 @@ pub struct AppState {
     /// Ordered list of available theme slugs (built-ins + user files).
     /// Rescanned on each theme cycle to pick up newly dropped files.
     pub available_themes: Vec<String>,
-    /// Cached rendered theme — rebuilt only when the slug changes or the
+    /// Cached rendered theme - rebuilt only when the slug changes or the
     /// user's override file is modified on disk (mtime check each tick).
     pub theme_cache: crate::ui::theme::Theme,
     /// Human-readable display name from the theme file's `name =` field.
@@ -112,19 +136,46 @@ pub struct AppState {
     pub theme_homepage: Option<String>,
     /// Last-known mtime of the active user theme file (None = no file / built-in).
     theme_cache_mtime: Option<std::time::SystemTime>,
-    /// Slug that was used to build `theme_cache` — detects slug changes.
+    /// Slug that was used to build `theme_cache` - detects slug changes.
     theme_cache_slug: String,
+    /// Active tab inside the inspect overlay.
+    pub inspect_tab: InspectTab,
+    /// Cursor row within the Handles tab of the inspect overlay.
+    pub inspect_handle_cursor: usize,
+    /// Whether the force-close confirm sub-dialog is open inside the inspect overlay.
+    pub inspect_close_confirm: bool,
     /// Whether the jump-to-PID input box is open.
     pub show_pid_jump: bool,
     /// Digits typed so far in the PID jump box.
     pub pid_jump_text: String,
     /// Set for one frame when the searched PID wasn't found.
     pub pid_jump_not_found: bool,
-    /// Previous per-process CPU% — used to detect spikes.
+    /// Cursor row within the Info tab (selects copyable field).
+    pub inspect_info_cursor: usize,
+    /// Cursor row within the Modules tab.
+    pub inspect_module_cursor: usize,
+    /// Cursor row within the Env tab.
+    pub inspect_env_cursor: usize,
+    /// Horizontal scroll offset (chars) for long lines in inspect panel.
+    pub inspect_h_offset: usize,
+    /// Cursor row within the Threads tab of the inspect overlay.
+    pub inspect_thread_cursor: usize,
+    /// Cursor row within the Network tab of the inspect overlay.
+    pub inspect_network_cursor: usize,
+    /// Whether the name search input box is open.
+    pub show_name_search: bool,
+    /// Text typed so far in the name search box.
+    pub name_search_text: String,
+    /// Set for one frame when no process matched the search.
+    pub name_search_not_found: bool,
+    /// Flat display order for tree view: indices into the sorted+filtered visible list.
+    /// Identity mapping in flat mode; DFS order in tree mode.
+    pub tree_display_order: Vec<usize>,
+    /// Previous per-process CPU% - used to detect spikes.
     prev_cpu_pct: HashMap<u32, f32>,
     /// PIDs that spiked >15 pp since the last sample; counter = frames remaining.
     pub cpu_spike_flash: HashMap<u32, u8>,
-    /// Cached HH:MM:SS timestamp string — refreshed once per second.
+    /// Cached HH:MM:SS timestamp string - refreshed once per second.
     pub cached_time: String,
     /// Unix-second at which `cached_time` was last formatted.
     last_time_sec: i64,
@@ -136,8 +187,6 @@ impl AppState {
         let show_sys = config.show_system_processes;
         let current_user_lower = std::env::var("USERNAME").unwrap_or_default().to_lowercase();
 
-        // Export built-in themes to the user themes dir on first launch so
-        // they have working examples to copy and customise.
         crate::ui::theme_file::export_builtin_themes();
 
         let available_themes = crate::ui::theme_file::available_themes();
@@ -166,6 +215,9 @@ impl AppState {
             show_inspect: false,
             inspect_data: None,
             inspect_scroll: 0,
+            inspect_tab: InspectTab::Info,
+            inspect_handle_cursor: 0,
+            inspect_close_confirm: false,
             show_wt_panel: false,
             wt_nerd_font_confirm: false,
             show_settings: false,
@@ -182,6 +234,16 @@ impl AppState {
             show_pid_jump: false,
             pid_jump_text: String::new(),
             pid_jump_not_found: false,
+            inspect_info_cursor: 0,
+            inspect_module_cursor: 0,
+            inspect_env_cursor: 0,
+            inspect_h_offset: 0,
+            inspect_thread_cursor: 0,
+            inspect_network_cursor: 0,
+            show_name_search: false,
+            name_search_text: String::new(),
+            name_search_not_found: false,
+            tree_display_order: Vec::new(),
             prev_cpu_pct: HashMap::new(),
             cpu_spike_flash: HashMap::new(),
             cached_time: Local::now().format("%H:%M:%S").to_string(),
@@ -193,7 +255,6 @@ impl AppState {
     /// for any PID that jumped more than 15 percentage points. Decrement all
     /// existing counters, removing entries that reach zero.
     pub fn update_cpu_spikes(&mut self) {
-        // Decrement / expire existing flash entries.
         self.cpu_spike_flash.retain(|_, v| {
             *v = v.saturating_sub(1);
             *v > 0
@@ -224,7 +285,7 @@ impl AppState {
         if slug_changed || file_modified {
             let result = crate::ui::theme_file::load_theme(&slug);
             if let Some(err) = result.error {
-                self.status_message = Some(format!("Theme error: {err} — using built-in fallback"));
+                self.status_message = Some(format!("Theme error: {err} - using built-in fallback"));
             }
             self.theme_display_name = result.display_name;
             self.theme_author       = result.author;
@@ -238,7 +299,6 @@ impl AppState {
     /// Advance (or retreat) to the next available theme, wrapping around.
     /// Rescans the themes directory first to pick up any newly dropped files.
     fn cycle_theme(&mut self, forward: bool) {
-        // Rescan so files added since startup appear immediately.
         self.available_themes = crate::ui::theme_file::available_themes();
 
         let themes = &self.available_themes;
@@ -257,7 +317,11 @@ impl AppState {
         let now = Local::now();
         let sec = now.timestamp();
         if sec != self.last_time_sec {
-            self.cached_time = now.format("%H:%M:%S").to_string();
+            self.cached_time = if self.config.time_24h {
+                now.format("%H:%M:%S").to_string()
+            } else {
+                now.format("%I:%M:%S %p").to_string()
+            };
             self.last_time_sec = sec;
         }
     }
@@ -274,35 +338,150 @@ impl AppState {
     }
 
     fn dispatch(&mut self, action: AppAction, visible_count: usize) {
-        // Clear any transient status message on the next meaningful key.
         if action != AppAction::None {
             self.status_message = None;
         }
         match action {
             AppAction::MoveUp => {
                 if self.show_inspect {
-                    self.inspect_scroll = self.inspect_scroll.saturating_sub(1);
+                    self.inspect_h_offset = 0;
+                    match self.inspect_tab {
+                        InspectTab::Handles => {
+                            self.inspect_handle_cursor = self.inspect_handle_cursor.saturating_sub(1);
+                        }
+                        InspectTab::Modules => {
+                            self.inspect_module_cursor = self.inspect_module_cursor.saturating_sub(1);
+                        }
+                        InspectTab::Env => {
+                            self.inspect_env_cursor = self.inspect_env_cursor.saturating_sub(1);
+                        }
+                        InspectTab::Info => {
+                            self.inspect_info_cursor = self.inspect_info_cursor.saturating_sub(1);
+                        }
+                        InspectTab::Threads => {
+                            self.inspect_thread_cursor = self.inspect_thread_cursor.saturating_sub(1);
+                        }
+                        InspectTab::Network => {
+                            self.inspect_network_cursor = self.inspect_network_cursor.saturating_sub(1);
+                        }
+                    }
                 } else if self.process_cursor > 0 {
                     self.process_cursor -= 1;
                 }
             }
             AppAction::MoveDown => {
                 if self.show_inspect {
-                    self.inspect_scroll = self.inspect_scroll.saturating_add(1);
+                    self.inspect_h_offset = 0;
+                    match self.inspect_tab {
+                        InspectTab::Handles => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.open_handles.len()).unwrap_or(0);
+                            if self.inspect_handle_cursor + 1 < count {
+                                self.inspect_handle_cursor += 1;
+                            }
+                        }
+                        InspectTab::Modules => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.modules.len()).unwrap_or(0);
+                            if self.inspect_module_cursor + 1 < count {
+                                self.inspect_module_cursor += 1;
+                            }
+                        }
+                        InspectTab::Env => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.env_vars.len()).unwrap_or(0);
+                            if self.inspect_env_cursor + 1 < count {
+                                self.inspect_env_cursor += 1;
+                            }
+                        }
+                        InspectTab::Info => {
+                            let max = crate::ui::inspect_panel::INFO_COPYABLE_COUNT;
+                            if self.inspect_info_cursor + 1 < max {
+                                self.inspect_info_cursor += 1;
+                            }
+                        }
+                        InspectTab::Threads => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.threads.len()).unwrap_or(0);
+                            if self.inspect_thread_cursor + 1 < count {
+                                self.inspect_thread_cursor += 1;
+                            }
+                        }
+                        InspectTab::Network => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.open_connections.len()).unwrap_or(0);
+                            if self.inspect_network_cursor + 1 < count {
+                                self.inspect_network_cursor += 1;
+                            }
+                        }
+                    }
                 } else if self.process_cursor + 1 < visible_count {
                     self.process_cursor += 1;
                 }
             }
             AppAction::PageUp => {
                 if self.show_inspect {
-                    self.inspect_scroll = self.inspect_scroll.saturating_sub(10);
+                    match self.inspect_tab {
+                        InspectTab::Handles => {
+                            self.inspect_handle_cursor = self.inspect_handle_cursor.saturating_sub(10);
+                        }
+                        InspectTab::Modules => {
+                            self.inspect_module_cursor = self.inspect_module_cursor.saturating_sub(10);
+                        }
+                        InspectTab::Env => {
+                            self.inspect_env_cursor = self.inspect_env_cursor.saturating_sub(10);
+                        }
+                        InspectTab::Threads => {
+                            self.inspect_thread_cursor = self.inspect_thread_cursor.saturating_sub(10);
+                        }
+                        InspectTab::Network => {
+                            self.inspect_network_cursor = self.inspect_network_cursor.saturating_sub(10);
+                        }
+                        _ => {
+                            self.inspect_scroll = self.inspect_scroll.saturating_sub(10);
+                        }
+                    }
                 } else {
                     self.process_cursor = self.process_cursor.saturating_sub(20);
                 }
             }
             AppAction::PageDown => {
                 if self.show_inspect {
-                    self.inspect_scroll = self.inspect_scroll.saturating_add(10);
+                    match self.inspect_tab {
+                        InspectTab::Handles => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.open_handles.len()).unwrap_or(0);
+                            self.inspect_handle_cursor =
+                                (self.inspect_handle_cursor + 10).min(count.saturating_sub(1));
+                        }
+                        InspectTab::Modules => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.modules.len()).unwrap_or(0);
+                            self.inspect_module_cursor =
+                                (self.inspect_module_cursor + 10).min(count.saturating_sub(1));
+                        }
+                        InspectTab::Env => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.env_vars.len()).unwrap_or(0);
+                            self.inspect_env_cursor =
+                                (self.inspect_env_cursor + 10).min(count.saturating_sub(1));
+                        }
+                        InspectTab::Threads => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.threads.len()).unwrap_or(0);
+                            self.inspect_thread_cursor =
+                                (self.inspect_thread_cursor + 10).min(count.saturating_sub(1));
+                        }
+                        InspectTab::Network => {
+                            let count = self.inspect_data.as_ref()
+                                .map(|d| d.open_connections.len()).unwrap_or(0);
+                            self.inspect_network_cursor =
+                                (self.inspect_network_cursor + 10).min(count.saturating_sub(1));
+                        }
+                        _ => {
+                            self.inspect_scroll = self.inspect_scroll.saturating_add(10);
+                        }
+                    }
                 } else {
                     self.process_cursor = (self.process_cursor + 20).min(visible_count.saturating_sub(1));
                 }
@@ -317,7 +496,9 @@ impl AppState {
                         .filter(|(_, p)| self.process_matches(p))
                         .map(|(i, _)| i)
                         .collect();
-                    if let Some(&real_idx) = filtered.get(self.process_cursor) {
+                    let disp = self.tree_display_order.get(self.process_cursor)
+                        .copied().unwrap_or(self.process_cursor);
+                    if let Some(&real_idx) = filtered.get(disp) {
                         let pid = procs[real_idx].pid;
                         let expanded = procs[real_idx].expanded;
                         procs[real_idx].expanded = !expanded;
@@ -335,6 +516,15 @@ impl AppState {
             AppAction::ToggleSortOrder => self.sort_state.ascending = !self.sort_state.ascending,
             AppAction::OpenFilter => self.filter_active = true,
             AppAction::CloseFilter => self.filter_active = false,
+            AppAction::FilterEsc => {
+                if self.filter_text.is_empty() {
+                    self.filter_active = false;
+                } else {
+                    self.filter_text.clear();
+                    self.filter_text_lower.clear();
+                    self.process_cursor = 0;
+                }
+            }
             AppAction::FilterChar(c) => {
                 self.filter_text.push(c);
                 self.filter_text_lower = self.filter_text.to_lowercase();
@@ -344,14 +534,15 @@ impl AppState {
                 self.filter_text_lower = self.filter_text.to_lowercase();
             }
             AppAction::KillProcess => {
-                // Capture the selected process before showing the dialog.
                 if let Ok(procs) = self.hub.processes.read() {
                     let filtered: Vec<(u32, String)> = procs
                         .iter()
                         .filter(|p| self.process_matches(p))
                         .map(|p| (p.pid, p.name.clone()))
                         .collect();
-                    if let Some((pid, name)) = filtered.get(self.process_cursor) {
+                    let disp = self.tree_display_order.get(self.process_cursor)
+                        .copied().unwrap_or(self.process_cursor);
+                    if let Some((pid, name)) = filtered.get(disp) {
                         self.kill_target = Some((*pid, name.clone()));
                         self.show_kill_confirm = true;
                     }
@@ -361,7 +552,7 @@ impl AppState {
                 if let Some((pid, ref name)) = self.kill_target.take() {
                     if !kill_process(pid) {
                         self.status_message = Some(format!(
-                            "Kill failed: {} (PID {}) — run as Administrator to kill system processes",
+                            "Kill failed: {} (PID {}) - run as Administrator to kill system processes",
                             name, pid
                         ));
                     }
@@ -446,11 +637,85 @@ impl AppState {
                 }
             }
             AppAction::ToggleHelp => self.show_help = !self.show_help,
+            AppAction::InspectNextTab => {
+                self.inspect_tab = self.inspect_tab.next();
+                self.inspect_h_offset = 0;
+            }
+            AppAction::InspectScrollLeft => {
+                self.inspect_h_offset = self.inspect_h_offset.saturating_sub(1);
+            }
+            AppAction::InspectScrollRight => {
+                self.inspect_h_offset += 1;
+            }
+            AppAction::InspectCopyLine => {
+                if let Some(ref data) = self.inspect_data {
+                    let text = crate::clipboard::get_copy_text(
+                        self.inspect_tab,
+                        data,
+                        &crate::clipboard::InspectCursors {
+                            info:    self.inspect_info_cursor,
+                            module:  self.inspect_module_cursor,
+                            handle:  self.inspect_handle_cursor,
+                            env:     self.inspect_env_cursor,
+                            thread:  self.inspect_thread_cursor,
+                            network: self.inspect_network_cursor,
+                        },
+                    );
+                    if let Some(s) = text {
+                        crate::clipboard::write_clipboard(&s);
+                        self.status_message = Some(format!("Copied: {}", crate::ui::truncate(&s, 60)));
+                    }
+                }
+            }
+            AppAction::InspectInitCloseHandle => {
+                if self.inspect_tab == InspectTab::Handles {
+                    if let Some(ref data) = self.inspect_data {
+                        if self.inspect_handle_cursor < data.open_handles.len() {
+                            self.inspect_close_confirm = true;
+                        }
+                    }
+                }
+            }
+            AppAction::ConfirmCloseHandle => {
+                self.inspect_close_confirm = false;
+                if let Some(ref mut data) = self.inspect_data {
+                    if let Some(entry) = data.open_handles.get(self.inspect_handle_cursor) {
+                        let pid = data.pid;
+                        let hv  = entry.handle_value;
+                        match crate::collectors::inspect::force_close_handle(pid, hv) {
+                            Ok(()) => {
+                                data.open_handles.remove(self.inspect_handle_cursor);
+                                if self.inspect_handle_cursor > 0
+                                    && self.inspect_handle_cursor >= data.open_handles.len()
+                                {
+                                    self.inspect_handle_cursor -= 1;
+                                }
+                                self.status_message = Some("Handle closed.".into());
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Close failed: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+            AppAction::CancelCloseHandle => {
+                self.inspect_close_confirm = false;
+            }
             AppAction::ToggleInspect => {
                 if self.show_inspect {
                     self.show_inspect = false;
                     self.inspect_data = None;
                     self.inspect_scroll = 0;
+                    self.inspect_tab = InspectTab::Info;
+                    self.inspect_handle_cursor = 0;
+                    self.inspect_close_confirm = false;
+                    self.inspect_info_cursor = 0;
+                    self.inspect_module_cursor = 0;
+                    self.inspect_env_cursor = 0;
+                    self.inspect_h_offset = 0;
+                    self.inspect_thread_cursor = 0;
+                    self.inspect_network_cursor = 0;
                 } else {
                     if let Ok(procs) = self.hub.processes.read() {
                         let filtered: Vec<(u32, String)> = procs
@@ -458,7 +723,9 @@ impl AppState {
                             .filter(|p| self.process_matches(p))
                             .map(|p| (p.pid, p.name.clone()))
                             .collect();
-                        if let Some((pid, name)) = filtered.get(self.process_cursor) {
+                        let disp = self.tree_display_order.get(self.process_cursor)
+                            .copied().unwrap_or(self.process_cursor);
+                        if let Some((pid, name)) = filtered.get(disp) {
                             self.inspect_data = Some(
                                 crate::collectors::inspect::collect_inspect(*pid, name),
                             );
@@ -536,7 +803,6 @@ impl AppState {
                 self.wt_nerd_font_confirm = false;
                 match self.wt_info.apply_nerd_font() {
                     Ok(()) => {
-                        // Refresh font_face in our snapshot so the panel shows the new font.
                         self.wt_info.font_face =
                             Some(crate::wt::NERD_FONT_FACE.to_string());
                         self.status_message = Some(format!(
@@ -554,6 +820,58 @@ impl AppState {
             }
             AppAction::WtCancelNerdFont => {
                 self.wt_nerd_font_confirm = false;
+            }
+            AppAction::ToggleTreeView => {
+                self.config.tree_view = !self.config.tree_view;
+                self.process_cursor = 0;
+                self.status_message = Some(if self.config.tree_view {
+                    "Tree view: on".to_string()
+                } else {
+                    "Tree view: off".to_string()
+                });
+                self.config.save();
+            }
+            AppAction::OpenNameSearch => {
+                self.show_name_search = true;
+                self.name_search_text.clear();
+                self.name_search_not_found = false;
+            }
+            AppAction::NameSearchChar(c) => {
+                self.name_search_text.push(c);
+                self.name_search_not_found = false;
+            }
+            AppAction::NameSearchBackspace => {
+                self.name_search_text.pop();
+                self.name_search_not_found = false;
+            }
+            AppAction::NameSearchCancel => {
+                self.show_name_search = false;
+                self.name_search_text.clear();
+                self.name_search_not_found = false;
+            }
+            AppAction::NameSearchConfirm => {
+                let needle = self.name_search_text.to_lowercase();
+                if let Ok(procs) = self.hub.processes.read() {
+                    let filtered: Vec<_> = procs
+                        .iter()
+                        .filter(|p| self.process_matches(p))
+                        .collect();
+                    let pos = self.tree_display_order.iter().position(|&di| {
+                        filtered.get(di)
+                            .map(|p| p.name.to_lowercase().contains(&needle))
+                            .unwrap_or(false)
+                    }).or_else(|| {
+                        filtered.iter().position(|p| p.name.to_lowercase().contains(&needle))
+                    });
+                    if let Some(idx) = pos {
+                        self.process_cursor = idx;
+                        self.show_name_search = false;
+                        self.name_search_text.clear();
+                        self.name_search_not_found = false;
+                    } else {
+                        self.name_search_not_found = true;
+                    }
+                }
             }
             AppAction::ToggleSettings => {
                 self.show_settings = !self.show_settings;
@@ -619,10 +937,8 @@ impl AppState {
             7 => self.config.show_system_processes = !self.config.show_system_processes,
             8 => self.config.hide_virtual_adapters = !self.config.hide_virtual_adapters,
             9 => {
-                // Open the adapter filter overlay.
                 self.show_net_filter = true;
                 self.net_filter_cursor = 0;
-                // Close settings panel while filter is open to avoid overlap.
                 self.show_settings = false;
             }
             10 => {
@@ -631,6 +947,11 @@ impl AppState {
                 } else {
                     self.config.refresh_interval_ms = self.config.refresh_interval_ms.saturating_sub(250).max(250);
                 }
+            }
+            11 => self.config.time_24h = !self.config.time_24h,
+            12 => {
+                self.config.tree_view = !self.config.tree_view;
+                self.process_cursor = 0;
             }
             _ => {}
         }
@@ -651,6 +972,57 @@ impl AppState {
         }
         true
     }
+}
+
+/// Build DFS tree display order.
+/// `procs` is the full sorted process Vec; `filtered` is sorted indices into it.
+/// Returns a Vec of indices into `filtered` in DFS parent-first order.
+pub fn build_tree_display_order(
+    procs: &[crate::models::process::ProcessEntry],
+    filtered: &[usize],
+) -> Vec<usize> {
+    use std::collections::HashMap;
+
+    let pid_to_fi: HashMap<u32, usize> = filtered
+        .iter()
+        .enumerate()
+        .map(|(fi, &ri)| (procs[ri].pid, fi))
+        .collect();
+
+    let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut roots: Vec<usize> = Vec::new();
+
+    for (fi, &ri) in filtered.iter().enumerate() {
+        let parent_pid = procs[ri].parent_pid;
+        if parent_pid > 0 {
+            if let Some(&parent_fi) = pid_to_fi.get(&parent_pid) {
+                if parent_fi != fi {
+                    children.entry(parent_fi).or_default().push(fi);
+                    continue;
+                }
+            }
+        }
+        roots.push(fi);
+    }
+
+    let mut order: Vec<usize> = Vec::with_capacity(filtered.len());
+    let mut stack: Vec<usize> = roots.into_iter().rev().collect();
+    while let Some(fi) = stack.pop() {
+        order.push(fi);
+        if let Some(mut kids) = children.remove(&fi) {
+            kids.reverse();
+            stack.extend(kids);
+        }
+    }
+
+    let visited: std::collections::HashSet<usize> = order.iter().copied().collect();
+    for fi in 0..filtered.len() {
+        if !visited.contains(&fi) {
+            order.push(fi);
+        }
+    }
+
+    order
 }
 
 /// Returns true if the user account is a Windows built-in service account.
@@ -725,7 +1097,6 @@ pub fn run(config: Config) -> anyhow::Result<()> {
 
     let result = event_loop(&mut terminal, config);
 
-    // Always restore terminal even if we error.
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -740,49 +1111,53 @@ fn event_loop(
     let mut state = AppState::new(config);
     let tick = Duration::from_millis(50); // 20fps draw rate
 
-    // Give collectors a moment to populate before first draw.
     std::thread::sleep(Duration::from_millis(300));
 
     loop {
         state.tick_time();
         state.refresh_theme();
 
-        // Check for dead collector threads (they only stop if they panicked).
         let dead = state.hub.dead_collectors();
         if !dead.is_empty() && state.status_message.is_none() {
             state.status_message = Some(format!(
-                "Collector crashed: {} — data may be stale",
+                "Collector crashed: {} - data may be stale",
                 dead.join(", ")
             ));
         }
 
-        // Drain any thread expansion results.
         state.drain_thread_results();
-
-        // Update CPU spike flash counters.
         state.update_cpu_spikes();
 
-        // Sort processes and compute visible count before drawing.
         let visible_count = {
             if let Ok(mut procs) = state.hub.processes.write() {
                 sort_processes(&mut procs, state.sort_state);
-                procs.iter().filter(|p| state.process_matches(p)).count()
+                let filtered: Vec<usize> = procs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| state.process_matches(p))
+                    .map(|(i, _)| i)
+                    .collect();
+                let count = filtered.len();
+                if state.config.tree_view {
+                    state.tree_display_order =
+                        build_tree_display_order(&procs, &filtered);
+                } else {
+                    state.tree_display_order = (0..count).collect();
+                }
+                count
             } else {
                 0
             }
         };
 
-        // Clamp cursor.
         if state.process_cursor >= visible_count && visible_count > 0 {
             state.process_cursor = visible_count - 1;
         }
 
-        // Draw.
         terminal.draw(|frame| {
             crate::ui::draw(frame, &state);
         })?;
 
-        // Poll for input.
         if event::poll(tick)? {
             if let Event::Key(key) = event::read()? {
                 // On Windows, crossterm fires both Press and Release events.
@@ -790,17 +1165,19 @@ fn event_loop(
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                let action = handle_key(
-                    key,
-                    state.filter_active,
-                    state.show_kill_confirm,
-                    state.show_wt_panel,
-                    state.wt_nerd_font_confirm,
-                    state.show_settings,
-                    state.show_inspect,
-                    state.show_pid_jump,
-                    state.show_net_filter,
-                );
+                let action = handle_key(key, &ModalState {
+                    filter_active:                state.filter_active,
+                    kill_confirm_active:          state.show_kill_confirm,
+                    wt_panel_active:              state.show_wt_panel,
+                    wt_nerd_font_confirm_active:  state.wt_nerd_font_confirm,
+                    settings_active:              state.show_settings,
+                    inspect_active:               state.show_inspect,
+                    inspect_close_confirm_active: state.inspect_close_confirm,
+                    pid_jump_active:              state.show_pid_jump,
+                    net_filter_active:            state.show_net_filter,
+                    help_active:                  state.show_help,
+                    name_search_active:           state.show_name_search,
+                });
                 if action == AppAction::Quit {
                     state.config.save();
                     return Ok(());

@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 use bytesize::ByteSize;
 use crate::models::process::{ProcessEntry, ProcessStatus};
 use crate::models::thread::ThreadEntry;
@@ -16,6 +17,7 @@ use windows::Win32::System::Threading::{
     OpenProcess, OpenProcessToken, PROCESS_QUERY_INFORMATION,
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
+
 use windows::core::PWSTR;
 
 pub struct ProcessCollector {
@@ -99,6 +101,7 @@ impl ProcessCollector {
                     pid,
                     pid_str: pid.to_string(),
                     name: p.name().to_string_lossy().into_owned(),
+                    parent_pid: p.parent().map(|id| id.as_u32()).unwrap_or(0),
                     cpu_pct,
                     cpu_pct_str: format!(" {:>5.1}%", cpu_pct),
                     mem_bytes: mem,
@@ -266,3 +269,4 @@ fn map_status(status: SysProcessStatus) -> ProcessStatus {
         _ => ProcessStatus::Unknown,
     }
 }
+

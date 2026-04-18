@@ -10,7 +10,11 @@ use crate::ui::theme::Theme;
 pub fn render(frame: &mut Frame, area: Rect, filter_text: &str, active: bool, theme: &Theme) {
     let style = if active { theme.filter_active } else { theme.filter_inactive };
 
-    let label = if active { "Filter: " } else { "Filter: (f to activate)" };
+    let label = if active {
+        if filter_text.is_empty() { "Filter: " } else { "Filter: (esc clears) " }
+    } else {
+        "Filter: (f to activate)"
+    };
 
     let cursor = if active { "▌" } else { "" };
 

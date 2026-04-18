@@ -52,7 +52,7 @@ pub struct Theme {
     /// How CPU / memory gauge bars are rendered.
     pub gauge_style: GaugeStyle,
 
-    /// Sparkline gradient — low / mid / high fill colours.
+    /// Sparkline gradient - low / mid / high fill colours.
     pub spark_low:  Color,
     pub spark_mid:  Color,
     pub spark_high: Color,
@@ -120,7 +120,7 @@ impl Theme {
         }
     }
 
-    /// Monochrome fallback when NO_COLOR is set — no colour at all.
+    /// Monochrome fallback when NO_COLOR is set - no colour at all.
     pub fn no_color() -> Self {
         let normal = Style::default();
         let bold   = Style::default().add_modifier(Modifier::BOLD);

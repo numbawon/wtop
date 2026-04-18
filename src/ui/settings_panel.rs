@@ -11,7 +11,7 @@ use crate::config::ProcessColumnId;
 use crate::ui::theme::Theme;
 
 /// Total number of selectable settings items.
-pub const SETTINGS_COUNT: usize = 11;
+pub const SETTINGS_COUNT: usize = 13;
 
 enum RowKind {
     Header,
@@ -81,11 +81,13 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         SettingRow::item("  Disk I/O Columns",   shown_hidden(disk_io_shown),                                   6),
         SettingRow::header("── Processes"),
         SettingRow::item("  System Processes",   shown_hidden(state.config.show_system_processes),              7),
+        SettingRow::item("  Tree View",           on_off(state.config.tree_view),                               12),
         SettingRow::header("── Network"),
         SettingRow::item("  Hide Virtual Adapters", on_off(state.config.hide_virtual_adapters),                 8),
         SettingRow::item("  Adapter Filters →",     format!("{} hidden", state.config.hidden_adapters.len()),   9),
         SettingRow::header("── General"),
         SettingRow::item("  Refresh Interval",   format!("{}ms", state.config.refresh_interval_ms),            10),
+        SettingRow::item("  Clock Format",       if state.config.time_24h { "24h".into() } else { "12h AM/PM".into() }, 11),
         SettingRow::spacer(),
         SettingRow::hint("  ↑↓ nav  ←→/Enter change  Esc close", ""),
     ]);
@@ -102,7 +104,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_set(theme.border_set.clone())
+                .border_set(theme.border_set)
                 .border_style(theme.border_focused)
                 .title(Span::styled(" Config ", theme.title)),
         );

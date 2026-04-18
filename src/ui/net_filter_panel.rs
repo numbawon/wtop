@@ -1,4 +1,4 @@
-//! Network adapter filter overlay — shows all detected adapters as a toggle list.
+//! Network adapter filter overlay - shows all detected adapters as a toggle list.
 //!
 //! Opened via the Config panel ("Adapter Filters →").
 //! Up/Down navigate, Space or Enter toggles, Esc saves and closes.
@@ -132,7 +132,7 @@ pub fn render(
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_set(theme.border_set.clone())
+            .border_set(theme.border_set)
             .border_style(theme.border_focused)
             .title(Span::styled(title, theme.title))
             .style(theme.panel_bg),
@@ -141,7 +141,7 @@ pub fn render(
     frame.render_widget(Clear, rect);
     frame.render_widget(table, rect);
 
-    // Scrollbar — only when list overflows.
+    // Scrollbar - only when list overflows.
     if total > visible_rows {
         let sb_rect = Rect {
             x: rect.x + rect.width - 1,

@@ -22,7 +22,7 @@ impl CpuCollector {
     /// Collect a fresh CPU snapshot.
     /// On the very first call we warm up sysinfo (it needs two calls ~200ms apart).
     pub fn collect(&mut self) -> CpuSnapshot {
-        // First call — seed the counters and return zeroed snapshot.
+        // First call - seed the counters and return zeroed snapshot.
         if self.last_collect.is_none() {
             self.sys.refresh_cpu_all();
             self.last_collect = Some(Instant::now());
@@ -31,7 +31,7 @@ impl CpuCollector {
 
         // Ensure at least 200ms between refreshes so deltas are meaningful.
         let elapsed = self.last_collect
-            .expect("last_collect is Some — the is_none() branch above returned early")
+            .expect("last_collect is Some - the is_none() branch above returned early")
             .elapsed();
         if elapsed < Duration::from_millis(200) {
             std::thread::sleep(Duration::from_millis(200) - elapsed);

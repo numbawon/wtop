@@ -1,4 +1,4 @@
-//! Unified bar/gauge renderer — wraps ratatui Gauge, LineGauge, and custom
+//! Unified bar/gauge renderer - wraps ratatui Gauge, LineGauge, and custom
 //! Segmented / ASCII styles behind a single `render_bar()` call.
 
 use ratatui::{
@@ -14,11 +14,11 @@ use crate::config::GaugeStyle;
 
 /// Render a single horizontal bar inside `area` (typically 1 row high).
 ///
-/// - `label`      — descriptive text shown inside/beside the bar
-/// - `ratio`      — fill fraction in 0.0–1.0
-/// - `fill_style` — colour for the filled portion (from `theme.gauge_for_pct`)
-/// - `text_style` — colour for label text overlaid on the bar (use `theme.text_normal`)
-/// - `gauge_style`— which visual variant to render
+/// - `label`      - descriptive text shown inside/beside the bar
+/// - `ratio`      - fill fraction in 0.0–1.0
+/// - `fill_style` - colour for the filled portion (from `theme.gauge_for_pct`)
+/// - `text_style` - colour for label text overlaid on the bar (use `theme.text_normal`)
+/// - `gauge_style`- which visual variant to render
 pub fn render_bar(
     frame: &mut Frame,
     area: Rect,
@@ -49,13 +49,13 @@ pub fn render_bar(
         }
 
         GaugeStyle::Segmented => {
-            // Phase 1 — draw the bar (filled blocks + empty space).
+            // Phase 1 - draw the bar (filled blocks + empty space).
             let w = area.width as usize;
             let bar = build_block_bar(ratio, w);
             let bar_para = Paragraph::new(Span::styled(bar, fill_style));
             frame.render_widget(bar_para, area);
 
-            // Phase 2 — overlay the label centred over the bar.
+            // Phase 2 - overlay the label centred over the bar.
             // ratatui renders widgets into a shared buffer; the label chars
             // simply overwrite the bar chars at those cell positions, producing
             // the classic "text floating on gauge" look.

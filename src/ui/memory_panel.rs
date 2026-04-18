@@ -23,7 +23,7 @@ pub fn render(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_set(theme.border_set.clone())
+        .border_set(theme.border_set)
         .border_style(border_style)
         .title(Span::styled(
             format!(" {}Memory ", glyphs.mem_icon),
@@ -33,7 +33,6 @@ pub fn render(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Three rows: RAM, Swap, Commit.
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

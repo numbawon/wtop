@@ -135,6 +135,7 @@ fn layout_wide(area: Rect, statusbar: Rect, show_disk: bool, show_network: bool)
 
 /// Generic stacked (single-column) layout with configurable panel heights.
 /// Omits disk/network rows when hidden, giving that space to processes.
+#[allow(clippy::too_many_arguments)]
 fn layout_stacked(
     area: Rect,
     statusbar: Rect,

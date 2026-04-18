@@ -9,7 +9,7 @@ wtop supports file-based themes written in TOML. Built-in themes are embedded in
 | Windows  | `%APPDATA%\wtop\themes\` |
 | Fallback | `./themes/` (next to the binary) |
 
-Drop any `.toml` file in this directory and it will appear in the theme cycle (`T` key) immediately — no restart required. The file is live-reloaded whenever it changes on disk.
+Drop any `.toml` file in this directory and it will appear in the theme cycle (`T` key) immediately - no restart required. The file is live-reloaded whenever it changes on disk.
 
 ## Built-in themes
 
@@ -42,7 +42,7 @@ border_style = "plain"     # plain | rounded | thick | double
 gauge_style  = "block"     # block | line | segmented | ascii
 spark_chars  = "unicode"   # unicode | ascii
 
-# panel_bg — set an explicit background color for overlay panels and table rows.
+# panel_bg - set an explicit background color for overlay panels and table rows.
 # Required for light themes so black text is readable on any terminal background.
 # panel_bg = "white"
 
@@ -112,7 +112,7 @@ spark_high       = "red"
 
 ### Tips
 
-- All `[colors]` fields are optional — any omitted field falls back to the built-in dark theme equivalent.
+- All `[colors]` fields are optional - any omitted field falls back to the built-in dark theme equivalent.
 - Use `[palette]` to define color aliases and keep hex values DRY across roles.
 - Use `panel_bg` and `row_bg` together when making a light theme (see `light.toml`).
 - Use `--list-themes` to see all available themes with their metadata.

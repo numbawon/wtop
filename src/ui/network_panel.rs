@@ -11,11 +11,11 @@ use crate::glyphs::Glyphs;
 use crate::models::network::NetSnapshot;
 use crate::ui::theme::Theme;
 
-/// Sort priority for a network adapter — lower number = higher in the list.
+/// Sort priority for a network adapter - lower number = higher in the list.
 fn sort_priority(n: &NetSnapshot) -> u8 {
     let has_traffic = n.rx_bps > 0 || n.tx_bps > 0;
     match (has_traffic, n.is_up, n.is_virtual) {
-        (true,  true,  _    ) => 0, // active traffic — always first
+        (true,  true,  _    ) => 0, // active traffic - always first
         (false, true,  false) => 1, // physical, up, idle
         (false, true,  true ) => 2, // virtual, up, idle
         (_,     false, false) => 3, // physical, down
@@ -65,7 +65,7 @@ pub fn render(
 
     let rows: Vec<Row> = if visible.is_empty() && networks.is_empty() {
         vec![Row::new(vec![
-            Cell::from("—"), Cell::from("—"), Cell::from("—"), Cell::from("—"),
+            Cell::from("-"), Cell::from("-"), Cell::from("-"), Cell::from("-"),
         ])
         .style(theme.text_dim)]
     } else if visible.is_empty() {
@@ -111,7 +111,7 @@ pub fn render(
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_set(theme.border_set.clone())
+            .border_set(theme.border_set)
             .border_style(border_style)
             .title(Span::styled(title, theme.title)),
     );

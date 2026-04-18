@@ -1,5 +1,6 @@
 pub mod cpu_panel;
 pub mod theme_file;
+pub mod name_search;
 pub mod net_filter_panel;
 pub mod pid_jump;
 pub mod disk_panel;
@@ -27,7 +28,7 @@ use crate::app::{AppState, FocusedPanel};
 use crate::glyphs::Glyphs;
 use theme::Theme;
 
-/// Main draw function — called every frame by the event loop.
+/// Main draw function - called every frame by the event loop.
 pub fn draw(frame: &mut Frame, state: &AppState) {
     let no_color_theme;
     let theme = if state.config.ascii_mode {
@@ -46,95 +47,92 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         state.config.show_network,
     );
 
-    // --- CPU panel ---
     if let Ok(cpu) = state.hub.cpu.read() {
         cpu_panel::render(
             frame,
             rects.cpu,
             &cpu,
-            &theme,
+            theme,
             &glyphs,
             state.focused_panel == FocusedPanel::Cpu,
         );
     }
 
-    // --- Memory panel ---
     if let Ok(mem) = state.hub.memory.read() {
         memory_panel::render(
             frame,
             rects.memory,
             &mem,
-            &theme,
+            theme,
             &glyphs,
             state.focused_panel == FocusedPanel::Memory,
         );
     }
 
-    // --- Disk panel ---
     if let (Ok(disks), Some(disk_rect)) = (state.hub.disks.read(), rects.disk) {
         disk_panel::render(
             frame,
             disk_rect,
             &disks,
-            &theme,
+            theme,
             &glyphs,
             state.focused_panel == FocusedPanel::Disk,
         );
     }
 
-    // --- Network panel ---
     if let (Ok(nets), Some(net_rect)) = (state.hub.networks.read(), rects.network) {
         network_panel::render(
             frame,
             net_rect,
             &nets,
             state,
-            &theme,
+            theme,
             &glyphs,
             state.focused_panel == FocusedPanel::Network,
         );
     }
 
-    // --- Process panel ---
     process_panel::render(
         frame,
         rects.processes,
         state,
-        &theme,
+        theme,
         &glyphs,
         state.focused_panel == FocusedPanel::Processes,
     );
 
-    // --- Status bar (keybindings + filter) ---
-    render_statusbar(frame, rects.statusbar, state, &theme);
+    render_statusbar(frame, rects.statusbar, state, theme);
 
-    // --- Overlays ---
     if state.show_help {
-        help_overlay::render(frame, area, &theme);
+        help_overlay::render(frame, area, theme);
     }
 
     if state.show_kill_confirm {
         if let Some((pid, ref name)) = state.kill_target {
-            kill_confirm::render(frame, area, pid, name, &theme);
+            kill_confirm::render(frame, area, pid, name, theme);
         }
     }
 
     if state.show_wt_panel {
-        wt_panel::render(frame, area, state, &theme);
+        wt_panel::render(frame, area, state, theme);
     }
 
     if state.show_settings {
-        settings_panel::render(frame, area, state, &theme);
+        settings_panel::render(frame, area, state, theme);
     }
 
     if state.show_inspect {
         if let Some(ref data) = state.inspect_data {
-            inspect_panel::render(frame, area, data, state.inspect_scroll, &theme);
+            inspect_panel::render(frame, area, data, state, theme);
         }
     }
 
     if state.show_pid_jump {
-        pid_jump::render(frame, area, &state.pid_jump_text, state.pid_jump_not_found, &theme);
+        pid_jump::render(frame, area, &state.pid_jump_text, state.pid_jump_not_found, theme);
+    }
+
+    if state.show_name_search {
+        name_search::render(frame, area, &state.name_search_text, state.name_search_not_found, theme);
     }
 
     if state.show_net_filter {
@@ -145,7 +143,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                 &nets,
                 &state.config.hidden_adapters,
                 state.net_filter_cursor,
-                &theme,
+                theme,
             );
         }
     }
@@ -170,11 +168,11 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
     }
 
     {
-        // Split the bar: keybindings on the left, clock on the far right.
-        // "%H:%M:%S" is always 8 chars; add 1 space of padding = 9.
+        // 24h "HH:MM:SS" = 8 chars; 12h "HH:MM:SS AM" = 11 chars. Add 1 padding each.
+        let clock_w = if state.config.time_24h { 9u16 } else { 12u16 };
         let halves = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(9)])
+            .constraints([Constraint::Min(0), Constraint::Length(clock_w)])
             .split(area);
         let left_area  = halves[0];
         let right_area = halves[1];

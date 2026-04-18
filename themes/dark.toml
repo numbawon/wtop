@@ -1,4 +1,4 @@
-# wtop — Dark theme (built-in default)
+# wtop - Dark theme (built-in default)
 # Copy this file to %APPDATA%\wtop\themes\ and edit to create your own theme.
 # All color values accept: hex (#rrggbb, #rgb) or terminal color names
 # (black, red, green, yellow, blue, magenta, cyan, gray, dark_gray,
@@ -17,7 +17,7 @@ border_style = "plain"
 gauge_style  = "block"
 spark_chars  = "unicode"
 
-# Named palette — reference these by name in [colors] below.
+# Named palette - reference these by name in [colors] below.
 [palette]
 
 [colors]

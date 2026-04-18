@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame, area: Rect, pid: u32, name: &str, theme: &Theme
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_set(theme.border_set.clone())
+                .border_set(theme.border_set)
                 .border_style(theme.gauge_high)
                 .title(Span::styled(" Kill Process? ", theme.title)),
         );

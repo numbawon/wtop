@@ -8,18 +8,23 @@ use ratatui::{
 use crate::ui::theme::Theme;
 
 const HELP: &[(&str, &str)] = &[
-    ("↑/↓  j/k",      "Navigate process list"),
+    ("↑/↓",           "Navigate process list"),
     ("PgUp/PgDn",      "Page up/down"),
-    ("Enter",          "Expand/collapse thread list"),
+    ("Home/End",       "Top / bottom of list"),
+    ("Enter",          "Expand/collapse threads inline"),
     ("Tab / Shift+Tab","Cycle panel focus"),
+    ("i",              "Inspect process (6-tab detail overlay)"),
+    ("t",              "Toggle tree view (parent/child hierarchy)"),
+    ("/",              "Search/jump by process name"),
+    ("Ctrl+G",         "Jump to PID"),
     ("s / S",          "Cycle sort column fwd/back"),
     ("r",              "Toggle sort ascending/descending"),
-    ("f",              "Open filter bar (Esc to close)"),
-    ("k",              "Kill selected process"),
+    ("f",              "Open filter bar (Esc clears/closes)"),
+    ("K",              "Kill selected process"),
     ("p",              "Toggle system processes"),
     ("u",              "Filter by current user"),
     ("+  /  -",        "Increase/decrease refresh rate"),
-    ("? / h",          "Toggle this help"),
+    ("? / h / Esc",    "Toggle this help"),
     ("g",              "Toggle Nerd Font glyphs on/off"),
     ("T",              "Cycle color theme"),
     ("L",              "Cycle layout mode (Auto/Compact/Wide/Stacked)"),
@@ -56,7 +61,7 @@ pub fn render(frame: &mut Frame, area: Rect, theme: &Theme) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_set(theme.border_set.clone())
+            .border_set(theme.border_set)
             .border_style(theme.border_focused)
             .title(Span::styled(" Keyboard Shortcuts ", theme.title)),
     );

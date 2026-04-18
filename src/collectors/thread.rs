@@ -1,3 +1,4 @@
+#![allow(clippy::manual_c_str_literals)]
 use crate::models::thread::{ThreadEntry, ThreadState};
 use std::collections::HashMap;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -254,7 +255,7 @@ fn build_thread_entry(
     states: &HashMap<u32, (ThreadState, u32)>,
 ) -> ThreadEntry {
     let tid = te.th32ThreadID;
-    let priority = te.tpBasePri as i32;
+    let priority = te.tpBasePri;
 
     let (kernel_ms, user_ms, start_address, start_module, name, suspicious) =
         query_thread_details(tid, pid).unwrap_or((0, 0, 0, "?".into(), None, false));
@@ -325,7 +326,7 @@ fn query_thread_name(handle: windows::Win32::Foundation::HANDLE) -> Option<Strin
         GetProcAddress(ntdll, PCSTR(b"NtQueryInformationThread\0".as_ptr()))
     }?;
 
-    // Safety: same transmute pattern as get_thread_start_address — documented
+    // Safety: same transmute pattern as get_thread_start_address - documented
     // NtQueryInformationThread calling convention, correct struct layouts.
     let nt_query: NtQueryInformationThreadFn =
         unsafe { std::mem::transmute(proc_addr) };
@@ -410,7 +411,7 @@ fn get_thread_start_address(handle: windows::Win32::Foundation::HANDLE) -> Optio
     // NtQueryInformationThread(ThreadHandle, Class, Information, Length, ReturnLength)
     // -> NTSTATUS "system" calling convention. We only use class 9
     // (ThreadQuerySetWin32StartAddress) which writes a single u64 into a
-    // caller-provided buffer — the size check (sizeof::<u64>) is passed explicitly.
+    // caller-provided buffer - the size check (sizeof::<u64>) is passed explicitly.
     let nt_query: NtQueryInformationThreadFn =
         unsafe { std::mem::transmute(proc_addr) };
 

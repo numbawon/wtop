@@ -60,7 +60,6 @@ impl CollectorHub {
         let history_len = config.cpu_history_len;
         let mut handles: Vec<(&'static str, JoinHandle<()>)> = Vec::new();
 
-        // CPU collector thread.
         {
             let state = Arc::clone(&cpu_state);
             let h = ThreadBuilder::new()
@@ -96,7 +95,6 @@ impl CollectorHub {
             handles.push(("cpu", h));
         }
 
-        // Memory collector thread.
         {
             let state = Arc::clone(&mem_state);
             let h = ThreadBuilder::new()
@@ -119,7 +117,6 @@ impl CollectorHub {
         let (thread_req_tx, thread_req_rx) = mpsc::channel::<u32>();
         let (thread_res_tx, thread_res_rx) = mpsc::channel::<(u32, Vec<ThreadEntry>)>();
 
-        // Process collector thread.
         {
             let state = Arc::clone(&proc_state);
             // Clone so the process thread can re-queue refresh requests for
@@ -156,7 +153,7 @@ impl CollectorHub {
                             }
                         }
 
-                        // Write lock only for the swap — minimal critical section.
+                        // Write lock only for the swap - minimal critical section.
                         if let Ok(mut s) = state.write() {
                             *s = snapshot;
                         }
@@ -177,7 +174,6 @@ impl CollectorHub {
             handles.push(("process", h));
         }
 
-        // Disk collector thread.
         {
             let state = Arc::clone(&disk_state);
             let h = ThreadBuilder::new()
@@ -196,7 +192,6 @@ impl CollectorHub {
             handles.push(("disk", h));
         }
 
-        // Network collector thread.
         {
             let state = Arc::clone(&net_state);
             let h = ThreadBuilder::new()

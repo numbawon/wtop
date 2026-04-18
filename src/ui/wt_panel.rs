@@ -1,4 +1,4 @@
-//! Windows Terminal info panel — shows WT detection status, current profile,
+//! Windows Terminal info panel - shows WT detection status, current profile,
 //! font face, and offers to apply a Nerd Font. Opened with `w`, closed with
 //! Esc / q / w. Font apply triggered with `f`, confirmed with Enter.
 
@@ -134,7 +134,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_set(theme.border_set.clone())
+        .border_set(theme.border_set)
         .border_style(theme.border_focused)
         .title(Span::styled(" Windows Terminal ", theme.title));
 
@@ -190,7 +190,7 @@ fn render_nerd_font_confirm(frame: &mut Frame, parent: Rect, theme: &Theme) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_set(theme.border_set.clone())
+        .border_set(theme.border_set)
         .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
         .title(Span::styled(
             " Confirm ",

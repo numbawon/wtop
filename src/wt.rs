@@ -1,4 +1,4 @@
-//! Windows Terminal integration — detect WT_SESSION, read/write settings.json.
+//! Windows Terminal integration - detect WT_SESSION, read/write settings.json.
 //!
 //! Phase 3A: detects whether wtop is running inside Windows Terminal, resolves
 //! the current profile and its font face, and can write a Nerd Font face back to
@@ -6,7 +6,7 @@
 //!
 //! NOTE: Windows Terminal's settings.json is JSONC (JSON with C-style comments
 //! and trailing commas). This module strips `//` and `/* */` comments before
-//! parsing. Trailing commas are not stripped — most default WT settings files
+//! parsing. Trailing commas are not stripped - most default WT settings files
 //! do not use them, but if yours does, the write-back will fail gracefully.
 
 use std::path::{Path, PathBuf};
@@ -198,7 +198,7 @@ fn strip_jsonc_comments(s: &str) -> String {
             in_string = true;
             out.push(ch);
         } else if ch == '/' && chars.peek() == Some(&'/') {
-            // Line comment — skip to end of line, preserve the newline.
+            // Line comment - skip to end of line, preserve the newline.
             for c in chars.by_ref() {
                 if c == '\n' {
                     out.push('\n');
@@ -206,7 +206,7 @@ fn strip_jsonc_comments(s: &str) -> String {
                 }
             }
         } else if ch == '/' && chars.peek() == Some(&'*') {
-            // Block comment — skip to closing `*/`, preserve newlines.
+            // Block comment - skip to closing `*/`, preserve newlines.
             chars.next(); // consume '*'
             let mut prev = ' ';
             for c in chars.by_ref() {

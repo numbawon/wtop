@@ -91,7 +91,7 @@ impl NetCollector {
         let mut entries = Vec::new();
         for row in rows {
             // Skip loopback adapters.
-            if row.Type == IF_TYPE_SOFTWARE_LOOPBACK as u32 {
+            if row.Type == IF_TYPE_SOFTWARE_LOOPBACK {
                 continue;
             }
 
@@ -134,7 +134,7 @@ impl NetCollector {
         unsafe { FreeMibTable(table_ptr as *mut _) };
 
         // Windows creates multiple MIB_IF_ROW2 entries for the same physical
-        // adapter — one per protocol binding or filter driver layer — all sharing
+        // adapter - one per protocol binding or filter driver layer - all sharing
         // the same MAC address but with different GUIDs. Use the MAC as the
         // canonical identity for physical adapters so we show one row per device.
         // Software adapters (tunnels, WAN miniports) have no MAC, so fall back
@@ -150,7 +150,7 @@ impl NetCollector {
                 entry.display_name.clone()
             };
             if let Some(&idx) = seen.get(&key) {
-                // Keep whichever entry has seen the most traffic — that's the
+                // Keep whichever entry has seen the most traffic - that's the
                 // "real" data-path interface for this device.
                 let new_total = entry.rx_total_bytes + entry.tx_total_bytes;
                 let old_total = deduped[idx].rx_total_bytes + deduped[idx].tx_total_bytes;

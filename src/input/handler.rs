@@ -1,5 +1,22 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+/// Active modal/overlay state - passed to `handle_key` to determine which
+/// modal block gets priority.
+#[derive(Default)]
+pub struct ModalState {
+    pub filter_active: bool,
+    pub kill_confirm_active: bool,
+    pub wt_panel_active: bool,
+    pub wt_nerd_font_confirm_active: bool,
+    pub settings_active: bool,
+    pub inspect_active: bool,
+    pub inspect_close_confirm_active: bool,
+    pub pid_jump_active: bool,
+    pub net_filter_active: bool,
+    pub help_active: bool,
+    pub name_search_active: bool,
+}
+
 /// All actions the UI can dispatch in response to key events.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppAction {
@@ -20,6 +37,7 @@ pub enum AppAction {
     CloseFilter,
     FilterChar(char),
     FilterBackspace,
+    FilterEsc,
     KillProcess,
     ConfirmKill,
     CancelKill,
@@ -44,6 +62,10 @@ pub enum AppAction {
     SettingsActivate,
     SettingsActivateBack,
     ToggleInspect,
+    InspectNextTab,
+    InspectInitCloseHandle,
+    ConfirmCloseHandle,
+    CancelCloseHandle,
     OpenPidJump,
     PidJumpChar(char),
     PidJumpBackspace,
@@ -53,38 +75,49 @@ pub enum AppAction {
     NetFilterDown,
     NetFilterToggle,
     NetFilterClose,
+    InspectScrollLeft,
+    InspectScrollRight,
+    InspectCopyLine,
+    ToggleTreeView,
+    OpenNameSearch,
+    NameSearchChar(char),
+    NameSearchBackspace,
+    NameSearchConfirm,
+    NameSearchCancel,
     None,
 }
 
 /// Map a crossterm KeyEvent to an AppAction.
-pub fn handle_key(
-    key: KeyEvent,
-    filter_active: bool,
-    kill_confirm_active: bool,
-    wt_panel_active: bool,
-    wt_nerd_font_confirm_active: bool,
-    settings_active: bool,
-    inspect_active: bool,
-    pid_jump_active: bool,
-    net_filter_active: bool,
-) -> AppAction {
-    // When the inspect overlay is open, scroll or close.
-    if inspect_active {
+pub fn handle_key(key: KeyEvent, m: &ModalState) -> AppAction {
+    // When the inspect overlay is open, handle its own modal states first.
+    if m.inspect_active {
+        if m.inspect_close_confirm_active {
+            return match key.code {
+                KeyCode::Enter => AppAction::ConfirmCloseHandle,
+                KeyCode::Esc   => AppAction::CancelCloseHandle,
+                _ => AppAction::None,
+            };
+        }
         return match key.code {
-            KeyCode::Char('i') | KeyCode::Esc => AppAction::ToggleInspect,
-            KeyCode::Up    | KeyCode::Char('k') => AppAction::MoveUp,
-            KeyCode::Down  | KeyCode::Char('j') => AppAction::MoveDown,
-            KeyCode::PageUp                     => AppAction::PageUp,
-            KeyCode::PageDown                   => AppAction::PageDown,
+            KeyCode::Char('i') | KeyCode::Esc    => AppAction::ToggleInspect,
+            KeyCode::Up                          => AppAction::MoveUp,
+            KeyCode::Down                        => AppAction::MoveDown,
+            KeyCode::PageUp                      => AppAction::PageUp,
+            KeyCode::PageDown                    => AppAction::PageDown,
+            KeyCode::Tab                         => AppAction::InspectNextTab,
+            KeyCode::Char('x')                   => AppAction::InspectInitCloseHandle,
+            KeyCode::Left                        => AppAction::InspectScrollLeft,
+            KeyCode::Right                       => AppAction::InspectScrollRight,
+            KeyCode::Char('y')                   => AppAction::InspectCopyLine,
             _ => AppAction::None,
         };
     }
 
     // When the PID jump box is open, only digits / confirm / cancel are accepted.
-    if pid_jump_active {
+    if m.pid_jump_active {
         return match key.code {
-            KeyCode::Enter => AppAction::PidJumpConfirm,
-            KeyCode::Esc => AppAction::PidJumpCancel,
+            KeyCode::Enter     => AppAction::PidJumpConfirm,
+            KeyCode::Esc       => AppAction::PidJumpCancel,
             KeyCode::Backspace => AppAction::PidJumpBackspace,
             KeyCode::Char(c) if c.is_ascii_digit() => AppAction::PidJumpChar(c),
             _ => AppAction::None,
@@ -92,18 +125,18 @@ pub fn handle_key(
     }
 
     // When the net filter overlay is open.
-    if net_filter_active {
+    if m.net_filter_active {
         return match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => AppAction::NetFilterClose,
-            KeyCode::Up   | KeyCode::Char('k') => AppAction::NetFilterUp,
-            KeyCode::Down | KeyCode::Char('j') => AppAction::NetFilterDown,
-            KeyCode::Enter | KeyCode::Char(' ') => AppAction::NetFilterToggle,
+            KeyCode::Esc | KeyCode::Char('q')         => AppAction::NetFilterClose,
+            KeyCode::Up                               => AppAction::NetFilterUp,
+            KeyCode::Down                             => AppAction::NetFilterDown,
+            KeyCode::Enter | KeyCode::Char(' ')       => AppAction::NetFilterToggle,
             _ => AppAction::None,
         };
     }
 
     // When the kill confirm dialog is open, only allow confirm or cancel.
-    if kill_confirm_active {
+    if m.kill_confirm_active {
         return match key.code {
             KeyCode::Enter => AppAction::ConfirmKill,
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => AppAction::CancelKill,
@@ -112,7 +145,7 @@ pub fn handle_key(
     }
 
     // When the Nerd Font confirmation sub-dialog is active.
-    if wt_nerd_font_confirm_active {
+    if m.wt_nerd_font_confirm_active {
         return match key.code {
             KeyCode::Enter => AppAction::WtApplyNerdFont,
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => AppAction::WtCancelNerdFont,
@@ -121,36 +154,55 @@ pub fn handle_key(
     }
 
     // When the WT info panel is open, only panel-specific keys work.
-    if wt_panel_active {
+    if m.wt_panel_active {
         return match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => AppAction::ToggleWtPanel,
-            KeyCode::Char('w') | KeyCode::Char('W') => AppAction::ToggleWtPanel,
-            KeyCode::Char('f') | KeyCode::Char('F') => AppAction::WtConfirmNerdFont,
+            KeyCode::Esc | KeyCode::Char('q')         => AppAction::ToggleWtPanel,
+            KeyCode::Char('w') | KeyCode::Char('W')   => AppAction::ToggleWtPanel,
+            KeyCode::Char('f') | KeyCode::Char('F')   => AppAction::WtConfirmNerdFont,
             _ => AppAction::None,
         };
     }
 
     // When the settings panel is open, only settings keys work.
-    if settings_active {
+    if m.settings_active {
         return match (key.modifiers, key.code) {
             (_, KeyCode::Esc)
             | (KeyModifiers::SHIFT, KeyCode::Char('C'))
             | (KeyModifiers::SHIFT, KeyCode::Char('c')) => AppAction::ToggleSettings,
-            (_, KeyCode::Up)   | (_, KeyCode::Char('k')) => AppAction::SettingsUp,
-            (_, KeyCode::Down) | (_, KeyCode::Char('j')) => AppAction::SettingsDown,
+            (_, KeyCode::Up)   => AppAction::SettingsUp,
+            (_, KeyCode::Down) => AppAction::SettingsDown,
             (_, KeyCode::Enter) | (_, KeyCode::Right)    => AppAction::SettingsActivate,
             (_, KeyCode::Left)                           => AppAction::SettingsActivateBack,
             _ => AppAction::None,
         };
     }
 
-    // When the filter bar is open, most keys feed into the search string.
-    if filter_active {
+    // When help overlay is open, Esc (or ? / h) dismisses it.
+    if m.help_active {
         return match key.code {
-            KeyCode::Esc => AppAction::CloseFilter,
+            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('h') => AppAction::ToggleHelp,
+            _ => AppAction::None,
+        };
+    }
+
+    // When the name search box is open.
+    if m.name_search_active {
+        return match key.code {
+            KeyCode::Enter     => AppAction::NameSearchConfirm,
+            KeyCode::Esc       => AppAction::NameSearchCancel,
+            KeyCode::Backspace => AppAction::NameSearchBackspace,
+            KeyCode::Char(c)   => AppAction::NameSearchChar(c),
+            _ => AppAction::None,
+        };
+    }
+
+    // When the filter bar is open, most keys feed into the search string.
+    if m.filter_active {
+        return match key.code {
+            KeyCode::Esc       => AppAction::FilterEsc,
             KeyCode::Backspace => AppAction::FilterBackspace,
-            KeyCode::Char(c) => AppAction::FilterChar(c),
-            KeyCode::Enter => AppAction::CloseFilter,
+            KeyCode::Char(c)   => AppAction::FilterChar(c),
+            KeyCode::Enter     => AppAction::CloseFilter,
             _ => AppAction::None,
         };
     }
@@ -159,9 +211,7 @@ pub fn handle_key(
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => AppAction::Quit,
         (_, KeyCode::Char('q')) => AppAction::Quit,
         (_, KeyCode::Up) => AppAction::MoveUp,
-        (KeyModifiers::NONE, KeyCode::Char('k')) => AppAction::MoveUp,
         (_, KeyCode::Down) => AppAction::MoveDown,
-        (_, KeyCode::Char('j')) => AppAction::MoveDown,
         (_, KeyCode::PageUp) => AppAction::PageUp,
         (_, KeyCode::PageDown) => AppAction::PageDown,
         (_, KeyCode::Home) => AppAction::Home,
@@ -189,6 +239,8 @@ pub fn handle_key(
         (_, KeyCode::Char('w')) => AppAction::ToggleWtPanel,
         (KeyModifiers::SHIFT, KeyCode::Char('C')) | (KeyModifiers::SHIFT, KeyCode::Char('c')) => AppAction::ToggleSettings,
         (_, KeyCode::Char('i')) => AppAction::ToggleInspect,
+        (_, KeyCode::Char('t')) => AppAction::ToggleTreeView,
+        (_, KeyCode::Char('/')) => AppAction::OpenNameSearch,
         _ => AppAction::None,
     }
 }

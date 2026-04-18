@@ -1,4 +1,4 @@
-# wtop — Light theme
+# wtop - Light theme
 # panel_bg sets an explicit background on overlay panels and all table rows so
 # that black text is readable regardless of the terminal's default background.
 
@@ -26,7 +26,7 @@ gauge_low        = "green"
 gauge_medium     = "amber"
 gauge_high       = "red"
 
-# row_bg forces an explicit background on normal/thread/suspicious/spike rows —
+# row_bg forces an explicit background on normal/thread/suspicious/spike rows -
 # needed on light themes so text is readable over any terminal background.
 row_bg           = "white"
 row_normal_fg    = "black"

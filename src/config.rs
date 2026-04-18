@@ -46,8 +46,10 @@ pub fn default_process_columns() -> Vec<ProcessColumn> {
 
 /// How the panels are arranged on screen.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum LayoutMode {
     /// Auto-select based on terminal width (default).
+    #[default]
     Auto,
     /// Force the compact/narrow stacked layout.
     Compact,
@@ -57,9 +59,6 @@ pub enum LayoutMode {
     Stacked,
 }
 
-impl Default for LayoutMode {
-    fn default() -> Self { Self::Auto }
-}
 
 impl LayoutMode {
     pub fn cycle(&self) -> Self {
@@ -94,9 +93,9 @@ impl LayoutMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GaugeStyle {
-    /// Filled solid block — standard ratatui `Gauge` widget.
+    /// Filled solid block - standard ratatui `Gauge` widget.
     Block,
-    /// Thin horizontal line — ratatui `LineGauge` widget.
+    /// Thin horizontal line - ratatui `LineGauge` widget.
     Line,
     /// Sub-cell Unicode block elements (▏▎▍▌▋▊▉█) for a smoother bar.
     Segmented,
@@ -104,7 +103,7 @@ pub enum GaugeStyle {
     Ascii,
 }
 
-/// Application configuration — persisted to %APPDATA%\wtop\config.toml.
+/// Application configuration - persisted to %APPDATA%\wtop\config.toml.
 ///
 /// `#[serde(default)]` ensures that fields added in future versions will
 /// deserialize to their `Default` value rather than failing on old config files.
@@ -115,7 +114,7 @@ pub struct Config {
     pub refresh_interval_ms: u64,
     /// Number of CPU history samples to keep for sparklines.
     pub cpu_history_len: usize,
-    /// Active color theme slug — matches a filename in the themes directory
+    /// Active color theme slug - matches a filename in the themes directory
     /// ("dark", "dracula", "my_theme", …).
     pub theme: String,
     /// Whether system processes are shown by default.
@@ -138,6 +137,10 @@ pub struct Config {
     /// Adapter display_names that are explicitly hidden in the network panel.
     #[serde(default)]
     pub hidden_adapters: Vec<String>,
+    /// Use 24-hour clock in the status bar (false = 12-hour AM/PM).
+    pub time_24h: bool,
+    /// Show processes in parent/child tree view instead of flat list.
+    pub tree_view: bool,
 }
 
 /// Normalise a theme name from any format into a lowercase slug.
@@ -165,6 +168,8 @@ impl Default for Config {
             ascii_mode: false,
             hide_virtual_adapters: false,
             hidden_adapters: Vec::new(),
+            time_24h: true,
+            tree_view: false,
         }
     }
 }
@@ -180,8 +185,6 @@ impl Config {
         let path = Self::config_path();
         if let Ok(text) = std::fs::read_to_string(&path) {
             if let Ok(mut config) = toml::from_str::<Config>(&text) {
-                // Normalise legacy PascalCase theme names from v0.1.x configs
-                // ("Dark" → "dark", "CatppuccinMocha" → "catppuccin_mocha", …).
                 config.theme = normalize_theme_slug(&config.theme);
                 return config;
             }

@@ -47,7 +47,7 @@ pub fn render(
 
     let rows: Vec<Row> = if sorted.is_empty() {
         vec![Row::new(vec![
-            Cell::from("—"), Cell::from("—"), Cell::from("—"), Cell::from("—"),
+            Cell::from("-"), Cell::from("-"), Cell::from("-"), Cell::from("-"),
         ])
         .style(theme.text_dim)]
     } else {
@@ -73,7 +73,7 @@ pub fn render(
                     let free_str = if d.total_bytes > 0 {
                         ByteSize(d.free_bytes).to_string()
                     } else {
-                        "—".to_string()
+                        "-".to_string()
                     };
                     let free_style = if d.total_bytes > 0 {
                         let used_pct = 100.0 - (d.free_bytes as f64 / d.total_bytes as f64 * 100.0);
@@ -90,7 +90,7 @@ pub fn render(
     };
 
     let mut constraints = vec![
-        Constraint::Min(4),     // drive letter — expands to fill available space
+        Constraint::Min(4),     // drive letter - expands to fill available space
         Constraint::Length(10), // READ/s
         Constraint::Length(10), // WRITE/s
         Constraint::Length(13), // 8 bar + 1 space + " XX.X%"
@@ -104,7 +104,7 @@ pub fn render(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_set(theme.border_set.clone())
+                .border_set(theme.border_set)
                 .border_style(border_style)
                 .title(Span::styled(
                     format!(" {}Disk I/O ", glyphs.disk_icon),

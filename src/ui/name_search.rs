@@ -1,6 +1,4 @@
-//! Jump-to-PID input overlay - shown when the user presses Ctrl+G.
-//!
-//! A small centered box with a digit input field. Enter confirms, Esc cancels.
+//! Jump-to-name search overlay - shown when the user presses `/`.
 
 use ratatui::{
     layout::Rect,
@@ -11,7 +9,7 @@ use ratatui::{
 
 use crate::ui::theme::Theme;
 
-const PANEL_W: u16 = 32;
+const PANEL_W: u16 = 42;
 const PANEL_H: u16 = 5;
 
 pub fn render(frame: &mut Frame, area: Rect, input: &str, not_found: bool, theme: &Theme) {
@@ -26,7 +24,7 @@ pub fn render(frame: &mut Frame, area: Rect, input: &str, not_found: bool, theme
 
     let cursor = if (frame.count() / 10).is_multiple_of(2) { "▌" } else { " " };
     let input_line = Line::from(vec![
-        Span::styled("  PID: ", theme.header),
+        Span::styled("  Name: ", theme.header),
         Span::styled(input, theme.text_bright),
         Span::styled(cursor, theme.text_bright),
     ]);
@@ -34,7 +32,7 @@ pub fn render(frame: &mut Frame, area: Rect, input: &str, not_found: bool, theme
     let hint_line = if not_found {
         Line::from(vec![
             Span::raw("  "),
-            Span::styled("PID not found", theme.gauge_high),
+            Span::styled("No match found", theme.gauge_high),
         ])
     } else {
         Line::from(vec![
@@ -50,7 +48,7 @@ pub fn render(frame: &mut Frame, area: Rect, input: &str, not_found: bool, theme
         .borders(Borders::ALL)
         .border_set(theme.border_set)
         .border_style(theme.border_focused)
-        .title(Span::styled(" Jump to PID ", theme.title))
+        .title(Span::styled(" Search Process ", theme.title))
         .style(theme.panel_bg);
 
     frame.render_widget(Clear, rect);

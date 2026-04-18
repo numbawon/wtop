@@ -26,6 +26,38 @@ impl std::fmt::Display for ProcessStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default)]
+pub enum IntegrityLevel {
+    Untrusted,
+    Low,
+    Medium,
+    High,
+    System,
+    #[default]
+    Unknown,
+}
+
+
+impl IntegrityLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Untrusted => "Untrusted",
+            Self::Low       => "Low",
+            Self::Medium    => "Medium",
+            Self::High      => "High",
+            Self::System    => "System",
+            Self::Unknown   => "?",
+        }
+    }
+}
+
+impl std::fmt::Display for IntegrityLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ProcessEntry {
     pub pid: u32,
@@ -37,12 +69,14 @@ pub struct ProcessEntry {
     pub thread_count: u32,
     pub disk_read_bps: u64,
     pub disk_write_bps: u64,
+    /// Parent process ID (0 if unknown or no parent).
+    pub parent_pid: u32,
     /// Whether the thread list is expanded in the UI.
     pub expanded: bool,
     /// Populated on demand when user expands the row.
     pub threads: Vec<ThreadEntry>,
 
-    // Pre-formatted display strings — computed once per collection cycle,
+    // Pre-formatted display strings - computed once per collection cycle,
     // borrowed by the render path to avoid per-frame allocations.
     pub pid_str: String,
     pub cpu_pct_str: String,
@@ -118,7 +152,7 @@ impl Default for SortState {
     }
 }
 
-pub fn sort_processes(processes: &mut Vec<ProcessEntry>, sort: SortState) {
+pub fn sort_processes(processes: &mut [ProcessEntry], sort: SortState) {
     processes.sort_by(|a, b| {
         let ord = match sort.field {
             ProcessSortField::Pid => a.pid.cmp(&b.pid),

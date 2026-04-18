@@ -39,7 +39,7 @@ pub struct Glyphs {
 }
 
 impl Glyphs {
-    /// Standard Unicode only — works in every terminal.
+    /// Standard Unicode only - works in every terminal.
     pub fn plain() -> Self {
         Self {
             cpu_icon: "",
@@ -57,7 +57,7 @@ impl Glyphs {
         }
     }
 
-    /// Nerd Font private-use glyphs — requires a Nerd Font to be active in
+    /// Nerd Font private-use glyphs - requires a Nerd Font to be active in
     /// the terminal (e.g. CaskaydiaCove Nerd Font Mono).
     ///
     /// Codepoints used:

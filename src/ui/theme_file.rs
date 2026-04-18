@@ -12,7 +12,7 @@
 //   border_style = "plain" | "rounded" | "thick" | "double"
 //   gauge_style  = "block"  | "line"   | "segmented" | "ascii"
 //   spark_chars  = "unicode" | "ascii"
-//   panel_bg     = "<color>"   # optional — set for light themes
+//   panel_bg     = "<color>"   # optional - set for light themes
 //
 //   [palette]
 //   my_color = "#rrggbb"     # named aliases for use in [colors]
@@ -83,7 +83,7 @@ pub fn available_themes() -> Vec<String> {
     if let Ok(entries) = std::fs::read_dir(themes_dir()) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "toml") {
+            if path.extension().is_some_and(|e| e == "toml") {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     let slug = stem.to_string();
                     if !themes.contains(&slug) {
@@ -97,18 +97,18 @@ pub fn available_themes() -> Vec<String> {
     themes
 }
 
-/// Result of loading a theme — always contains a usable theme even on error.
+/// Result of loading a theme - always contains a usable theme even on error.
 pub struct ThemeLoadResult {
     pub theme: Theme,
     /// Human-readable display name from the `name =` field, or a formatted slug.
     pub display_name: String,
     /// From the `author =` field.
     pub author: Option<String>,
-    /// From the `version =` field — shown by `--list-themes`.
+    /// From the `version =` field - shown by `--list-themes`.
     pub version: Option<String>,
-    /// From the `description =` field — shown by `--list-themes`.
+    /// From the `description =` field - shown by `--list-themes`.
     pub description: Option<String>,
-    /// From the `homepage =` field — link to the upstream color scheme.
+    /// From the `homepage =` field - link to the upstream color scheme.
     pub homepage: Option<String>,
     /// Set when the TOML parsed but had errors, or the file could not be read.
     pub error: Option<String>,
@@ -117,7 +117,7 @@ pub struct ThemeLoadResult {
 /// Load a theme by slug.
 ///
 /// Resolution order:
-///   1. `%APPDATA%\wtop\themes\<slug>.toml`  (user file — wins over built-ins)
+///   1. `%APPDATA%\wtop\themes\<slug>.toml`  (user file - wins over built-ins)
 ///   2. Embedded built-in TOML for that slug
 ///   3. Compiled-in `Theme::default_dark()` as a last resort
 ///
@@ -286,7 +286,7 @@ pub struct ThemeFile {
     pub gauge_style: String,
     #[serde(default = "default_spark_chars")]
     pub spark_chars: String,
-    /// Explicit panel background — set for light themes.
+    /// Explicit panel background - set for light themes.
     pub panel_bg: Option<String>,
     /// Named color aliases referenced in [colors].
     #[serde(default)]
@@ -299,7 +299,7 @@ fn default_border_style() -> String { "plain".into() }
 fn default_gauge_style()  -> String { "block".into() }
 fn default_spark_chars()  -> String { "unicode".into() }
 
-/// All fields are optional — missing values fall back to the dark theme equivalent.
+/// All fields are optional - missing values fall back to the dark theme equivalent.
 #[derive(Debug, Default, Deserialize)]
 pub struct ThemeColors {
     pub border:           Option<String>,
@@ -393,7 +393,7 @@ impl From<ThemeFile> for Theme {
             }
         };
 
-        // ── row_bg — optional explicit background for plain rows ──────────────
+        // ── row_bg - optional explicit background for plain rows ──────────────
         let row_bg: Option<Color> = c.row_bg.as_ref().and_then(|s| {
             let hex = pal.get(s.as_str()).map_or(s.as_str(), |v| v.as_str());
             parse_color(hex)
