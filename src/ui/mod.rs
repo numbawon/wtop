@@ -83,11 +83,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         );
     }
 
-    if let (Ok(gpus), Some(gpu_rect)) = (state.hub.gpus.read(), rects.gpu) {
+    if let (Ok(gpus), Ok(npus), Some(gpu_rect)) = (
+        state.hub.gpus.read(),
+        state.hub.npus.read(),
+        rects.gpu,
+    ) {
+        let visible_npus: &[_] = if state.config.show_npu { &npus } else { &[] };
         gpu_panel::render(
             frame,
             gpu_rect,
             &gpus,
+            visible_npus,
             theme,
             &glyphs,
             state.focused_panel == FocusedPanel::Gpu,
@@ -221,10 +227,12 @@ fn render_statusbar(frame: &mut Frame, area: Rect, state: &AppState, theme: &The
             Span::styled(":Expand  ", theme.text_dim),
             Span::styled("f", theme.text_bright),
             Span::styled(":Filter  ", theme.text_dim),
-            Span::styled("K", theme.text_bright),
-            Span::styled(":Kill  ", theme.text_dim),
             Span::styled("u", theme.text_bright),
             Span::styled(":UserFilter  ", theme.text_dim),
+            Span::styled("K", theme.text_bright),
+            Span::styled(":Kill  ", theme.text_dim),
+            Span::styled("y", theme.text_bright),
+            Span::styled(":Copy  ", theme.text_dim),
             user_filter_span,
             Span::styled(&refresh, theme.text_dim),
         ]);

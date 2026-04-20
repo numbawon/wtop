@@ -94,6 +94,8 @@ pub enum AppAction {
     ServicesFilterChar(char),
     ServicesFilterBackspace,
     ServicesFilterClear,
+    ServicesCopyLine,
+    ProcessCopyLine,
     None,
 }
 
@@ -216,6 +218,7 @@ pub fn handle_key(key: KeyEvent, m: &ModalState) -> AppAction {
             KeyCode::PageDown                 => AppAction::ServicesPageDown,
             KeyCode::Backspace                => AppAction::ServicesFilterBackspace,
             KeyCode::Delete                   => AppAction::ServicesFilterClear,
+            KeyCode::Char('y')                => AppAction::ServicesCopyLine,
             KeyCode::Char(c)                  => AppAction::ServicesFilterChar(c),
             _ => AppAction::None,
         };
@@ -268,6 +271,7 @@ pub fn handle_key(key: KeyEvent, m: &ModalState) -> AppAction {
         (_, KeyCode::Char('t')) => AppAction::ToggleTreeView,
         (_, KeyCode::Char('/')) => AppAction::OpenNameSearch,
         (_, KeyCode::Char('v')) => AppAction::ToggleServices,
+        (_, KeyCode::Char('y')) => AppAction::ProcessCopyLine,
         _ => AppAction::None,
     }
 }

@@ -1,3 +1,8 @@
+use windows::Win32::Devices::DeviceAndDriverInstallation::{
+    SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
+    SetupDiGetDeviceRegistryPropertyW, DIGCF_ALLCLASSES, DIGCF_PRESENT, HDEVINFO,
+    SP_DEVINFO_DATA, SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME,
+};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1,
     DXGI_ADAPTER_FLAG_SOFTWARE,
@@ -10,6 +15,7 @@ use windows::Win32::System::Performance::{
 use windows::core::PCWSTR;
 
 use crate::models::gpu::GpuAdapter;
+use crate::models::npu::NpuAdapter;
 use crate::models::RingBuffer;
 
 const PDH_MORE_DATA: u32 = 0x800007D2;
@@ -23,9 +29,12 @@ struct AdapterInfo {
 
 pub struct GpuCollector {
     adapters: Vec<AdapterInfo>,
+    npu_adapters: Vec<AdapterInfo>,
     query: isize,
     counter_vram: isize,
     counter_util: isize,
+    /// False when no GPU adapters are present (VRAM counter was not added).
+    has_vram: bool,
     valid: bool,
     scratch_buf: Vec<u8>,
 }
@@ -37,15 +46,17 @@ impl GpuCollector {
         let _ = history_len;
         let dead = Self {
             adapters: Vec::new(),
+            npu_adapters: Vec::new(),
             query: 0,
             counter_vram: 0,
             counter_util: 0,
+            has_vram: false,
             valid: false,
             scratch_buf: Vec::new(),
         };
 
-        let adapters = match enumerate_adapters() {
-            Ok(a) if !a.is_empty() => a,
+        let (gpu_adapters, npu_adapters) = match enumerate_adapters() {
+            Ok(pair) if !pair.0.is_empty() || !pair.1.is_empty() => pair,
             _ => return dead,
         };
 
@@ -57,20 +68,22 @@ impl GpuCollector {
             }
 
             let mut counter_vram: isize = 0;
-            let mut counter_util: isize = 0;
+            let has_vram = !gpu_adapters.is_empty() && {
+                PdhAddEnglishCounterW(
+                    query,
+                    windows::core::w!(r"\GPU Adapter Memory(*)\Dedicated Usage"),
+                    0,
+                    &mut counter_vram,
+                ) == 0
+            };
 
-            if PdhAddEnglishCounterW(
-                query,
-                windows::core::w!(r"\GPU Adapter Memory(*)\Dedicated Usage"),
-                0,
-                &mut counter_vram,
-            ) != 0
-            {
+            if !gpu_adapters.is_empty() && !has_vram {
                 tracing::warn!("GpuCollector: failed to add VRAM counter");
                 PdhCloseQuery(query);
                 return dead;
             }
 
+            let mut counter_util: isize = 0;
             if PdhAddEnglishCounterW(
                 query,
                 windows::core::w!(r"\GPU Engine(*)\Utilization Percentage"),
@@ -86,37 +99,44 @@ impl GpuCollector {
             PdhCollectQueryData(query);
 
             Self {
-                adapters,
+                adapters: gpu_adapters,
+                npu_adapters,
                 query,
                 counter_vram,
                 counter_util,
+                has_vram,
                 valid: true,
                 scratch_buf: Vec::new(),
             }
         }
     }
 
-    pub fn collect(&mut self, history_len: usize) -> Vec<GpuAdapter> {
+    pub fn collect(&mut self, _history_len: usize) -> (Vec<GpuAdapter>, Vec<NpuAdapter>) {
         if !self.valid {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
 
         unsafe {
             if PdhCollectQueryData(self.query) != 0 {
-                return Vec::new();
+                return (Vec::new(), Vec::new());
             }
         }
 
-        let vram_samples = self.sample_counter(self.counter_vram);
+        let vram_samples = if self.has_vram {
+            self.sample_counter(self.counter_vram)
+        } else {
+            Vec::new()
+        };
         let util_samples = self.sample_counter(self.counter_util);
 
-        let mut result: Vec<GpuAdapter> = self.adapters.iter().map(|a| {
+        // ── GPU adapters ──────────────────────────────────────────────────────
+        let mut gpu_result: Vec<GpuAdapter> = self.adapters.iter().map(|a| {
             GpuAdapter {
                 name: a.name.clone(),
                 vram_total_bytes: a.vram_total_bytes,
                 vram_used_bytes: 0,
                 utilization_pct: 0.0,
-                util_history: RingBuffer::new(history_len),
+                util_history: RingBuffer::new(0),
             }
         }).collect();
 
@@ -124,13 +144,12 @@ impl GpuCollector {
             let lower = instance.to_lowercase();
             for (i, adapter) in self.adapters.iter().enumerate() {
                 if lower.contains(&adapter.luid_prefix) {
-                    result[i].vram_used_bytes = *bytes;
+                    gpu_result[i].vram_used_bytes = *bytes;
                     break;
                 }
             }
         }
 
-        // Sum utilization from all 3D engine instances per adapter LUID.
         let mut util_sums: Vec<f64> = vec![0.0; self.adapters.len()];
         let mut util_counts: Vec<u32> = vec![0; self.adapters.len()];
         for (instance, pct_u64) in &util_samples {
@@ -147,13 +166,41 @@ impl GpuCollector {
                 }
             }
         }
-        for (i, gpu) in result.iter_mut().enumerate() {
+        for (i, gpu) in gpu_result.iter_mut().enumerate() {
             if util_counts[i] > 0 {
                 gpu.utilization_pct = (util_sums[i] / util_counts[i] as f64).clamp(0.0, 100.0) as f32;
             }
         }
 
-        result
+        // ── NPU adapters - sum all engine types for the LUID ─────────────────
+        let mut npu_result: Vec<NpuAdapter> = self.npu_adapters.iter().map(|a| {
+            NpuAdapter {
+                name: a.name.clone(),
+                utilization_pct: 0.0,
+                util_history: RingBuffer::new(0),
+            }
+        }).collect();
+
+        let mut npu_sums: Vec<f64> = vec![0.0; self.npu_adapters.len()];
+        let mut npu_counts: Vec<u32> = vec![0; self.npu_adapters.len()];
+        for (instance, pct_u64) in &util_samples {
+            let lower = instance.to_lowercase();
+            let pct = *pct_u64 as f64 / 100.0;
+            for (i, adapter) in self.npu_adapters.iter().enumerate() {
+                if !adapter.luid_prefix.is_empty() && lower.contains(&adapter.luid_prefix) {
+                    npu_sums[i] += pct;
+                    npu_counts[i] += 1;
+                    break;
+                }
+            }
+        }
+        for (i, npu) in npu_result.iter_mut().enumerate() {
+            if npu_counts[i] > 0 {
+                npu.utilization_pct = (npu_sums[i] / npu_counts[i] as f64).clamp(0.0, 100.0) as f32;
+            }
+        }
+
+        (gpu_result, npu_result)
     }
 
     fn sample_counter(&mut self, counter: isize) -> Vec<(String, u64)> {
@@ -222,9 +269,24 @@ impl Drop for GpuCollector {
     }
 }
 
-fn enumerate_adapters() -> windows::core::Result<Vec<AdapterInfo>> {
+fn is_npu(name: &str) -> bool {
+    let lc = name.to_lowercase();
+    lc.contains("npu")
+        || lc.contains("neural")
+        || lc.contains("ai boost")   // Intel NPU (Meteor Lake)
+        || lc.contains("xdna")       // AMD XDNA
+        || lc.contains("ryzen ai")   // AMD Ryzen AI branding
+        || lc.contains("amd ai")     // AMD AI Engine
+        || lc.contains("myriad")     // Intel Myriad VPU
+        || lc.contains("vpu")
+        || lc.contains("hexagon")    // Qualcomm Hexagon NPU
+        // "ipu" intentionally excluded: matches Intel camera Image Processing Units (USB)
+}
+
+fn enumerate_adapters() -> windows::core::Result<(Vec<AdapterInfo>, Vec<AdapterInfo>)> {
     let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }?;
-    let mut adapters = Vec::new();
+    let mut gpus = Vec::new();
+    let mut npus = Vec::new();
 
     for i in 0u32.. {
         let adapter: IDXGIAdapter1 = match unsafe { factory.EnumAdapters1(i) } {
@@ -238,28 +300,114 @@ fn enumerate_adapters() -> windows::core::Result<Vec<AdapterInfo>> {
             continue;
         }
 
-        let name = String::from_utf16_lossy(&desc.Description)
-            .trim_end_matches('\0')
-            .to_string();
+        let raw = String::from_utf16_lossy(&desc.Description);
+        let name = raw.split('\0').next().unwrap_or("").trim().to_string();
 
         if name.is_empty() || name.contains("Microsoft Basic Render Driver") {
             continue;
         }
 
         let luid = desc.AdapterLuid;
-        // PDH instance format: "luid_0x<HighPart>_0x<LowPart>_..."
         let luid_prefix = format!(
             "luid_0x{:08x}_0x{:08x}",
             luid.HighPart as u32,
             luid.LowPart,
         );
 
-        adapters.push(AdapterInfo {
-            name,
+        let info = AdapterInfo {
+            name: name.clone(),
             luid_prefix,
             vram_total_bytes: desc.DedicatedVideoMemory as u64,
-        });
+        };
+
+        if is_npu(&name) {
+            npus.push(info);
+        } else {
+            gpus.push(info);
+        }
     }
 
-    Ok(adapters)
+    // Supplement with NPUs visible in Device Manager but not in DXGI (e.g. AMD XDNA).
+    for name in scan_npu_device_names() {
+        let already_found = npus.iter().any(|n| n.name.eq_ignore_ascii_case(&name));
+        if !already_found {
+            npus.push(AdapterInfo {
+                name,
+                luid_prefix: String::new(), // no PDH LUID available
+                vram_total_bytes: 0,
+            });
+        }
+    }
+
+    Ok((gpus, npus))
+}
+
+/// Enumerate present PCI devices via SetupAPI and return names of any NPU-like devices.
+/// Restricts to PCI bus to avoid false positives from USB devices. Runs once at startup.
+fn scan_npu_device_names() -> Vec<String> {
+    let mut result = Vec::new();
+
+    // Enumerate PCI bus only - NPUs are PCI devices; USB/HID devices are excluded.
+    let enumerator = windows::core::w!("PCI");
+    let devs = match unsafe {
+        SetupDiGetClassDevsW(None, enumerator, None, DIGCF_PRESENT | DIGCF_ALLCLASSES)
+    } {
+        Ok(h) if !h.is_invalid() => h,
+        _ => return result,
+    };
+
+    let mut dev_info = SP_DEVINFO_DATA {
+        cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+        ..Default::default()
+    };
+
+    let mut i = 0u32;
+    loop {
+        if unsafe { SetupDiEnumDeviceInfo(devs, i, &mut dev_info) }.is_err() {
+            break;
+        }
+        i += 1;
+
+        // Prefer device description (reliable); friendly name is often vendor-branded.
+        let name = read_device_property(devs, &dev_info, SPDRP_DEVICEDESC)
+            .or_else(|| read_device_property(devs, &dev_info, SPDRP_FRIENDLYNAME));
+
+        if let Some(n) = name {
+            if is_npu(&n) {
+                result.push(n);
+            }
+        }
+    }
+
+    unsafe { let _ = SetupDiDestroyDeviceInfoList(devs); }
+    result
+}
+
+fn read_device_property(
+    devs: HDEVINFO,
+    dev_info: &SP_DEVINFO_DATA,
+    property: windows::Win32::Devices::DeviceAndDriverInstallation::SETUP_DI_REGISTRY_PROPERTY,
+) -> Option<String> {
+    let mut buf = vec![0u8; 512];
+    let ok = unsafe {
+        SetupDiGetDeviceRegistryPropertyW(
+            devs,
+            dev_info as *const SP_DEVINFO_DATA,
+            property,
+            None,
+            Some(&mut buf),
+            None,
+        )
+    };
+    if ok.is_err() {
+        return None;
+    }
+    // Buffer is REG_SZ (UTF-16LE).
+    let words: Vec<u16> = buf
+        .chunks_exact(2)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]))
+        .collect();
+    let raw = String::from_utf16_lossy(&words);
+    let s = raw.split('\0').next().unwrap_or("").trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
 }

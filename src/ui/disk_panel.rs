@@ -125,7 +125,7 @@ fn build_spark_line<'a>(d: &DiskSnapshot, util: f64, theme: &'a Theme) -> Line<'
         .collect();
 
     spans.push(Span::styled(
-        format!(" {:4.1}%", util),
+        format!("{:5.1}%", util),
         theme.gauge_for_pct(util),
     ));
 

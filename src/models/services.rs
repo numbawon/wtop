@@ -26,7 +26,7 @@ impl ServiceStatus {
 
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum ServiceStartType {
     Boot,
     System,

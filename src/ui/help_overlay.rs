@@ -25,7 +25,7 @@ const HELP: &[(&str, &str)] = &[
     ("K",              "Kill selected process"),
     ("p",              "Toggle system processes"),
     ("+  /  -",        "Increase/decrease refresh rate"),
-    ("? / h / Esc",    "Toggle this help"),
+    ("? / h",          "Toggle this help"),
     ("g  /  G",        "Toggle Nerd Font glyphs / GPU panel"),
     ("T",              "Cycle color theme"),
     ("L",              "Cycle layout mode (Auto/Compact/Wide/Stacked)"),

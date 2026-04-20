@@ -178,6 +178,8 @@ pub struct AppState {
     pub services_cursor: usize,
     /// Filter text typed while services panel is open.
     pub services_filter: String,
+    /// Lowercase cache of `services_filter`.
+    pub services_filter_lower: String,
     /// Flat display order for tree view: indices into the sorted+filtered visible list.
     /// Identity mapping in flat mode; DFS order in tree mode.
     pub tree_display_order: Vec<usize>,
@@ -189,6 +191,8 @@ pub struct AppState {
     pub cached_time: String,
     /// Unix-second at which `cached_time` was last formatted.
     last_time_sec: i64,
+    /// Time, column, row of the last left mouse-down - used for double-click detection.
+    last_click: Option<(std::time::Instant, u16, u16)>,
 }
 
 impl AppState {
@@ -256,11 +260,13 @@ impl AppState {
             show_services: false,
             services_cursor: 0,
             services_filter: String::new(),
+            services_filter_lower: String::new(),
             tree_display_order: Vec::new(),
             prev_cpu_pct: HashMap::new(),
             cpu_spike_flash: HashMap::new(),
             cached_time: Local::now().format("%H:%M:%S").to_string(),
             last_time_sec: Local::now().timestamp(),
+            last_click: None,
         }
     }
 
@@ -274,14 +280,16 @@ impl AppState {
         });
 
         if let Ok(procs) = self.hub.processes.read() {
+            let mut new_prev = HashMap::with_capacity(procs.len());
             for p in procs.iter() {
                 let prev = self.prev_cpu_pct.get(&p.pid).copied().unwrap_or(0.0);
                 if p.cpu_pct - prev > 15.0 {
                     // ~400 ms of flash at 50 ms tick rate (8 frames).
                     self.cpu_spike_flash.insert(p.pid, 8);
                 }
-                self.prev_cpu_pct.insert(p.pid, p.cpu_pct);
+                new_prev.insert(p.pid, p.cpu_pct);
             }
+            self.prev_cpu_pct = new_prev;
         }
     }
 
@@ -522,8 +530,30 @@ impl AppState {
                     }
                 }
             }
-            AppAction::NextPanel => self.focused_panel = self.focused_panel.next(),
-            AppAction::PrevPanel => self.focused_panel = self.focused_panel.prev(),
+            AppAction::NextPanel => {
+                let mut next = self.focused_panel.next();
+                for _ in 0..6 {
+                    match next {
+                        FocusedPanel::Disk    if !self.config.show_disk    => next = next.next(),
+                        FocusedPanel::Network if !self.config.show_network => next = next.next(),
+                        FocusedPanel::Gpu     if !self.config.show_gpu     => next = next.next(),
+                        _ => break,
+                    }
+                }
+                self.focused_panel = next;
+            }
+            AppAction::PrevPanel => {
+                let mut prev = self.focused_panel.prev();
+                for _ in 0..6 {
+                    match prev {
+                        FocusedPanel::Disk    if !self.config.show_disk    => prev = prev.prev(),
+                        FocusedPanel::Network if !self.config.show_network => prev = prev.prev(),
+                        FocusedPanel::Gpu     if !self.config.show_gpu     => prev = prev.prev(),
+                        _ => break,
+                    }
+                }
+                self.focused_panel = prev;
+            }
             AppAction::SortNext => self.sort_state.field = self.sort_state.field.next(),
             AppAction::SortPrev => self.sort_state.field = self.sort_state.field.prev(),
             AppAction::ToggleSortOrder => self.sort_state.ascending = !self.sort_state.ascending,
@@ -677,6 +707,36 @@ impl AppState {
                     if let Some(s) = text {
                         crate::clipboard::write_clipboard(&s);
                         self.status_message = Some(format!("Copied: {}", crate::ui::truncate(&s, 60)));
+                    }
+                }
+            }
+            AppAction::ProcessCopyLine => {
+                if let Ok(procs) = self.hub.processes.read() {
+                    let filtered: Vec<&crate::models::process::ProcessEntry> = procs
+                        .iter()
+                        .filter(|p| self.process_matches(p))
+                        .collect();
+                    let disp = self.tree_display_order.get(self.process_cursor)
+                        .copied().unwrap_or(self.process_cursor);
+                    if let Some(p) = filtered.get(disp) {
+                        let text = format!("{} (PID {})", p.name, p.pid);
+                        crate::clipboard::write_clipboard(&text);
+                        self.status_message = Some(format!("Copied: {}", text));
+                    }
+                }
+            }
+            AppAction::ServicesCopyLine => {
+                if let Ok(svcs) = self.hub.services.read() {
+                    let lower = &self.services_filter_lower;
+                    let visible: Vec<&crate::models::services::ServiceEntry> = svcs.iter()
+                        .filter(|s| lower.is_empty()
+                            || s.name.to_lowercase().contains(lower.as_str())
+                            || s.display_name.to_lowercase().contains(lower.as_str()))
+                        .collect();
+                    if let Some(svc) = visible.get(self.services_cursor) {
+                        let text = svc.display_name.clone();
+                        crate::clipboard::write_clipboard(&text);
+                        self.status_message = Some(format!("Copied: {}", text));
                     }
                 }
             }
@@ -903,6 +963,7 @@ impl AppState {
                 if !self.show_services {
                     self.services_cursor = 0;
                     self.services_filter.clear();
+                    self.services_filter_lower.clear();
                 }
             }
             AppAction::ServicesUp => {
@@ -923,14 +984,17 @@ impl AppState {
             }
             AppAction::ServicesFilterChar(c) => {
                 self.services_filter.push(c);
+                self.services_filter_lower = self.services_filter.to_lowercase();
                 self.services_cursor = 0;
             }
             AppAction::ServicesFilterBackspace => {
                 self.services_filter.pop();
+                self.services_filter_lower = self.services_filter.to_lowercase();
                 self.services_cursor = 0;
             }
             AppAction::ServicesFilterClear => {
                 self.services_filter.clear();
+                self.services_filter_lower.clear();
                 self.services_cursor = 0;
             }
             AppAction::ToggleSettings => {
@@ -985,6 +1049,13 @@ impl AppState {
                 }
             }
             6 => {
+                self.config.show_gpu = !self.config.show_gpu;
+                if !self.config.show_gpu && self.focused_panel == FocusedPanel::Gpu {
+                    self.focused_panel = FocusedPanel::Processes;
+                }
+            }
+            7 => self.config.show_npu = !self.config.show_npu,
+            8 => {
                 let shown = self.config.process_columns
                     .iter()
                     .any(|c| c.id == ProcessColumnId::DiskRead && c.visible);
@@ -994,41 +1065,35 @@ impl AppState {
                     }
                 }
             }
-            7 => self.config.show_system_processes = !self.config.show_system_processes,
-            8 => self.config.hide_virtual_adapters = !self.config.hide_virtual_adapters,
-            9 => {
+            9  => self.config.show_system_processes = !self.config.show_system_processes,
+            10 => {
+                self.config.tree_view = !self.config.tree_view;
+                self.process_cursor = 0;
+            }
+            11 => self.config.hide_virtual_adapters = !self.config.hide_virtual_adapters,
+            12 => {
                 self.show_net_filter = true;
                 self.net_filter_cursor = 0;
                 self.show_settings = false;
             }
-            10 => {
+            13 => {
                 if forward {
                     self.config.refresh_interval_ms = (self.config.refresh_interval_ms + 250).min(5000);
                 } else {
                     self.config.refresh_interval_ms = self.config.refresh_interval_ms.saturating_sub(250).max(250);
                 }
             }
-            11 => self.config.time_24h = !self.config.time_24h,
-            12 => {
-                self.config.tree_view = !self.config.tree_view;
-                self.process_cursor = 0;
-            }
-            23 => {
-                self.config.show_gpu = !self.config.show_gpu;
-                if !self.config.show_gpu && self.focused_panel == FocusedPanel::Gpu {
-                    self.focused_panel = FocusedPanel::Processes;
-                }
-            }
-            13 => self.toggle_column(ProcessColumnId::Pid),
-            14 => self.toggle_column(ProcessColumnId::Name),
-            15 => self.toggle_column(ProcessColumnId::CpuPct),
-            16 => self.toggle_column(ProcessColumnId::Mem),
-            17 => self.toggle_column(ProcessColumnId::MemPct),
-            18 => self.toggle_column(ProcessColumnId::Threads),
-            19 => self.toggle_column(ProcessColumnId::Status),
-            20 => self.toggle_column(ProcessColumnId::User),
-            21 => self.toggle_column(ProcessColumnId::DiskRead),
-            22 => self.toggle_column(ProcessColumnId::DiskWrite),
+            14 => self.config.time_24h = !self.config.time_24h,
+            15 => self.toggle_column(ProcessColumnId::Pid),
+            16 => self.toggle_column(ProcessColumnId::Name),
+            17 => self.toggle_column(ProcessColumnId::CpuPct),
+            18 => self.toggle_column(ProcessColumnId::Mem),
+            19 => self.toggle_column(ProcessColumnId::MemPct),
+            20 => self.toggle_column(ProcessColumnId::Threads),
+            21 => self.toggle_column(ProcessColumnId::Status),
+            22 => self.toggle_column(ProcessColumnId::User),
+            23 => self.toggle_column(ProcessColumnId::DiskRead),
+            24 => self.toggle_column(ProcessColumnId::DiskWrite),
             _ => {}
         }
     }
@@ -1042,13 +1107,13 @@ impl AppState {
 
     fn filtered_services_count(&self) -> usize {
         if let Ok(svcs) = self.hub.services.read() {
-            if self.services_filter.is_empty() {
+            if self.services_filter_lower.is_empty() {
                 return svcs.len();
             }
-            let lower = self.services_filter.to_lowercase();
+            let lower = &self.services_filter_lower;
             svcs.iter()
-                .filter(|s| s.name.to_lowercase().contains(&lower)
-                    || s.display_name.to_lowercase().contains(&lower))
+                .filter(|s| s.name.to_lowercase().contains(lower.as_str())
+                    || s.display_name.to_lowercase().contains(lower.as_str()))
                 .count()
         } else {
             0
@@ -1295,17 +1360,167 @@ fn event_loop(
     }
 }
 
+fn handle_inspect_mouse(
+    mouse: crossterm::event::MouseEvent,
+    state: &mut AppState,
+    term_size: ratatui::layout::Rect,
+) {
+    use crate::ui::inspect_panel::PANEL_W;
+    let panel_x = term_size.x + term_size.width.saturating_sub(PANEL_W) / 2;
+    let mc = mouse.column;
+    let mr = mouse.row;
+
+    match mouse.kind {
+        MouseEventKind::ScrollUp   => state.dispatch(AppAction::MoveUp,   0),
+        MouseEventKind::ScrollDown => state.dispatch(AppAction::MoveDown,  0),
+        MouseEventKind::Down(MouseButton::Left) => {
+            // Tab bar is the first line inside the border (panel_y + 1).
+            // We don't know panel_y precisely without re-running layout, but the
+            // tab bar spans the full terminal width of the panel, so we only care
+            // about the X offset relative to the inner-left edge.
+            //
+            // Tab positions (relative to inner left = panel_x + 1):
+            //   2..9   "[ Info ]"
+            //  12..22  "[ Threads ]"
+            //  25..35  "[ Modules ]"
+            //  38..48  "[ Handles ]"
+            //  51..61  "[ Network ]"
+            //  64..70  "[ Env ]"
+            let inner_left = panel_x + 1;
+            if mc >= inner_left {
+                let rel = (mc - inner_left) as usize;
+                let tab = match rel {
+                     2..=9   => Some(InspectTab::Info),
+                    12..=22  => Some(InspectTab::Threads),
+                    25..=35  => Some(InspectTab::Modules),
+                    38..=48  => Some(InspectTab::Handles),
+                    51..=61  => Some(InspectTab::Network),
+                    64..=70  => Some(InspectTab::Env),
+                    _ => None,
+                };
+                if let Some(t) = tab {
+                    // Only treat as a tab click if the row is plausibly on the tab bar.
+                    // The panel is vertically centered; tab bar is at panel_y + 1.
+                    // panel_y >= (term_height - MAX_PANEL_H) / 2, so tab bar row is
+                    // within the top half of the terminal at minimum.
+                    let max_tab_row = term_size.y + term_size.height / 2 + 4;
+                    if mr <= max_tab_row {
+                        state.inspect_tab = t;
+                        return;
+                    }
+                }
+            }
+            // Click outside panel width closes the overlay.
+            if mc < panel_x || mc >= panel_x + PANEL_W {
+                state.dispatch(AppAction::ToggleInspect, 0);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_settings_mouse(
+    mouse: crossterm::event::MouseEvent,
+    state: &mut AppState,
+    term_size: ratatui::layout::Rect,
+) {
+    const WIDTH: u16 = 58;
+    const HEIGHT: u16 = 36;
+    let x = term_size.x + (term_size.width.saturating_sub(WIDTH)) / 2;
+    let y = term_size.y + (term_size.height.saturating_sub(HEIGHT)) / 2;
+    let mc = mouse.column;
+    let mr = mouse.row;
+
+    match mouse.kind {
+        MouseEventKind::ScrollUp   => state.dispatch(AppAction::SettingsUp,   0),
+        MouseEventKind::ScrollDown => state.dispatch(AppAction::SettingsDown,  0),
+        MouseEventKind::Down(MouseButton::Left) => {
+            if mc < x || mc >= x + WIDTH || mr < y || mr >= y + HEIGHT {
+                state.dispatch(AppAction::ToggleSettings, 0);
+                return;
+            }
+            // Rows start at y+1 (inside border). Map click to a cursor index and activate.
+            let table_row = (mr - (y + 1)) as usize;
+            let has_attribution = state.theme_author.is_some() || state.theme_homepage.is_some();
+            if let Some(cursor) = crate::ui::settings_panel::click_row_to_cursor(table_row, has_attribution) {
+                state.settings_cursor = cursor;
+                state.dispatch(AppAction::SettingsActivate, 0);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_services_mouse(
+    mouse: crossterm::event::MouseEvent,
+    state: &mut AppState,
+    term_size: ratatui::layout::Rect,
+) {
+    // Mirror the popup geometry from services_panel::render.
+    let width  = term_size.width.min(100);
+    let height = term_size.height.clamp(10, 40);
+    let x = term_size.x + (term_size.width.saturating_sub(width)) / 2;
+    let y = term_size.y + (term_size.height.saturating_sub(height)) / 2;
+
+    let mc = mouse.column;
+    let mr = mouse.row;
+
+    match mouse.kind {
+        MouseEventKind::ScrollUp => state.dispatch(AppAction::ServicesUp, 0),
+        MouseEventKind::ScrollDown => state.dispatch(AppAction::ServicesDown, 0),
+        MouseEventKind::Down(MouseButton::Left) => {
+            // Click outside popup closes the overlay.
+            if mc < x || mc >= x + width || mr < y || mr >= y + height {
+                state.dispatch(AppAction::ToggleServices, 0);
+                return;
+            }
+            let data_start_y = y + 2; // border row + header row
+            if mr < data_start_y {
+                return;
+            }
+            let inner_height = (height.saturating_sub(3)) as usize;
+            let scroll_offset = state.services_cursor.saturating_sub(inner_height.saturating_sub(1));
+            let clicked_row = (mr - data_start_y) as usize + scroll_offset;
+            let count = state.filtered_services_count();
+            if clicked_row < count {
+                state.services_cursor = clicked_row;
+            }
+        }
+        _ => {}
+    }
+}
+
 fn handle_mouse_event(
     mouse: crossterm::event::MouseEvent,
     state: &mut AppState,
     visible_count: usize,
     term_size: ratatui::layout::Rect,
 ) {
-    // Skip mouse events when any modal overlay is open - keyboard takes priority.
-    if state.show_inspect || state.show_kill_confirm || state.show_settings
-        || state.show_wt_panel || state.show_pid_jump || state.show_net_filter
-        || state.show_help || state.show_name_search || state.filter_active
-        || state.show_services
+    // Services overlay intercepts scroll and click independently.
+    if state.show_services {
+        handle_services_mouse(mouse, state, term_size);
+        return;
+    }
+
+    if state.show_inspect {
+        handle_inspect_mouse(mouse, state, term_size);
+        return;
+    }
+    if state.show_settings {
+        handle_settings_mouse(mouse, state, term_size);
+        return;
+    }
+    if state.show_help {
+        // Click anywhere to close.
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            state.dispatch(AppAction::ToggleHelp, 0);
+        }
+        return;
+    }
+
+    // Skip mouse events when any other modal overlay is open - keyboard takes priority.
+    if state.show_kill_confirm || state.show_wt_panel || state.show_pid_jump
+        || state.show_net_filter || state.show_name_search || state.filter_active
     {
         return;
     }
@@ -1332,10 +1547,16 @@ fn handle_mouse_event(
             state.dispatch(AppAction::MoveDown, visible_count);
         }
         MouseEventKind::Down(MouseButton::Left) => {
+            let now = std::time::Instant::now();
+            let is_double = state.last_click.is_some_and(|(t, lc, lr)| {
+                now.duration_since(t).as_millis() < 400 && lc == mc && lr == mr
+            });
+            state.last_click = Some((now, mc, mr));
+
             if in_rect(rects.processes) {
                 state.focused_panel = FocusedPanel::Processes;
-                let header_y = rects.processes.y + 1; // y+1 = inside border
-                let data_start_y = rects.processes.y + 2; // +1 for header row
+                let header_y = rects.processes.y + 1;
+                let data_start_y = rects.processes.y + 2;
                 if mr == header_y && mc > rects.processes.x {
                     // Column header click - sort by that column
                     let inner_x = (mc - (rects.processes.x + 1)) as usize;
@@ -1357,17 +1578,20 @@ fn handle_mouse_event(
                     let display_row = (mr - data_start_y) as usize;
                     if display_row < visible_count {
                         state.process_cursor = display_row;
+                        if is_double {
+                            state.dispatch(AppAction::ExpandCollapse, visible_count);
+                        }
                     }
                 }
             } else if in_rect(rects.cpu) {
                 state.focused_panel = FocusedPanel::Cpu;
             } else if in_rect(rects.memory) {
                 state.focused_panel = FocusedPanel::Memory;
-            } else if rects.disk.is_some_and(|r| in_rect(r)) {
+            } else if rects.disk.is_some_and(in_rect) {
                 state.focused_panel = FocusedPanel::Disk;
-            } else if rects.network.is_some_and(|r| in_rect(r)) {
+            } else if rects.network.is_some_and(in_rect) {
                 state.focused_panel = FocusedPanel::Network;
-            } else if rects.gpu.is_some_and(|r| in_rect(r)) {
+            } else if rects.gpu.is_some_and(in_rect) {
                 state.focused_panel = FocusedPanel::Gpu;
             }
         }
@@ -1376,15 +1600,29 @@ fn handle_mouse_event(
 }
 
 /// Map a click x-position (relative to process panel inner area) to a sort field.
-/// Returns None for columns that have no corresponding sort field.
+/// Returns None for columns that have no corresponding sort field or clicks outside columns.
+///
+/// Accounts for ratatui Table layout: selection_width (highlight symbol = 2) is reserved
+/// before column 0, and column_spacing (1) is inserted between every adjacent column.
 fn col_sort_field_at_x(
     vis_cols: &[&ProcessColumnId],
     inner_width: usize,
     click_x: usize,
 ) -> Option<ProcessSortField> {
-    // Fixed column widths matching col_constraint() in process_panel.rs.
+    // Must match ratatui 0.29 Table defaults: highlight_symbol "» "/"\u{e0b1} " = 2 display chars,
+    // column_spacing = 1.
+    const SELECTION_WIDTH: usize = 2;
+    const COLUMN_SPACING: usize = 1;
+
+    let col_count = vis_cols.len();
+    if col_count == 0 || click_x < SELECTION_WIDTH {
+        return None;
+    }
+
+    let total_spacing = col_count.saturating_sub(1) * COLUMN_SPACING;
+
     let fixed_total: usize = vis_cols.iter().filter_map(|id| match id {
-        ProcessColumnId::Name => None,
+        ProcessColumnId::Name      => None,
         ProcessColumnId::Pid       => Some(7usize),
         ProcessColumnId::CpuPct    => Some(10),
         ProcessColumnId::Mem       => Some(9),
@@ -1396,11 +1634,22 @@ fn col_sort_field_at_x(
         ProcessColumnId::DiskWrite => Some(11),
     }).sum();
 
+    // Width available for columns (inner_width minus selection gutter and inter-column gaps).
+    let columns_area_width = inner_width.saturating_sub(SELECTION_WIDTH);
     let has_name = vis_cols.iter().any(|id| matches!(id, ProcessColumnId::Name));
-    let name_width = if has_name { inner_width.saturating_sub(fixed_total).max(18) } else { 0 };
+    let name_width = if has_name {
+        columns_area_width
+            .saturating_sub(fixed_total + total_spacing)
+            .max(18)
+    } else {
+        0
+    };
+
+    // Offset within the columns_area (after the selection gutter).
+    let col_click_x = click_x - SELECTION_WIDTH;
 
     let mut x = 0usize;
-    for id in vis_cols {
+    for (i, id) in vis_cols.iter().enumerate() {
         let w = match id {
             ProcessColumnId::Name      => name_width,
             ProcessColumnId::Pid       => 7,
@@ -1413,7 +1662,7 @@ fn col_sort_field_at_x(
             ProcessColumnId::DiskRead  => 11,
             ProcessColumnId::DiskWrite => 11,
         };
-        if click_x >= x && click_x < x + w {
+        if col_click_x >= x && col_click_x < x + w {
             return match id {
                 ProcessColumnId::Pid       => Some(ProcessSortField::Pid),
                 ProcessColumnId::Name      => Some(ProcessSortField::Name),
@@ -1426,6 +1675,9 @@ fn col_sort_field_at_x(
             };
         }
         x += w;
+        if i + 1 < col_count {
+            x += COLUMN_SPACING;
+        }
     }
     None
 }

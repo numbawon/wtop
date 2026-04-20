@@ -28,6 +28,8 @@ impl ProcessColumn {
     }
 }
 
+fn default_true() -> bool { true }
+
 /// Default ordered column list. DiskRead/DiskWrite are hidden by default.
 pub fn default_process_columns() -> Vec<ProcessColumn> {
     vec![
@@ -129,6 +131,9 @@ pub struct Config {
     pub show_network: bool,
     /// Whether the GPU panel is visible.
     pub show_gpu: bool,
+    /// Whether the NPU sub-panel is shown inside the GPU row (no effect if no NPU detected).
+    #[serde(default = "default_true")]
+    pub show_npu: bool,
     /// Ordered, per-column visibility for the process table.
     #[serde(default = "default_process_columns")]
     pub process_columns: Vec<ProcessColumn>,
@@ -167,6 +172,7 @@ impl Default for Config {
             show_disk: true,
             show_network: true,
             show_gpu: true,
+            show_npu: true,
             process_columns: default_process_columns(),
             ascii_mode: false,
             hide_virtual_adapters: false,

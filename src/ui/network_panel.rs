@@ -101,10 +101,10 @@ pub fn render(
     let table = Table::new(
         rows,
         [
-            Constraint::Min(28),
+            Constraint::Min(10),
             Constraint::Length(10),
             Constraint::Length(10),
-            Constraint::Length(4),
+            Constraint::Length(3),
         ],
     )
     .header(header)

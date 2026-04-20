@@ -20,7 +20,7 @@ use crate::models::thread::{wait_reason_label, ThreadState};
 use crate::ui::theme::Theme;
 use crate::ui::truncate;
 
-const PANEL_W: u16 = 100;
+pub const PANEL_W: u16 = 100;
 /// Characters available for values after the 14-char label + 2-char left padding.
 const VALUE_W: usize = (PANEL_W as usize) - 18;
 /// Maximum panel height.

@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 # wtop
 
@@ -12,6 +12,7 @@
 
 <br>
 
+<!-- screenshot: main — full layout with GPU/NPU panel visible, heat gradient gauges -->
 ![wtop main view](docs/screenshots/main.png)
 
 </div>
@@ -26,19 +27,26 @@ Another tool in the belt. When Task Manager is too noisy and Process Explorer is
 
 | Panel | |
 |-------|-|
-| **CPU** | Per-core usage with sparkline history |
-| **Memory** | RAM and commit charge with history |
-| **Disk** | Read/write bytes per second, utilization per physical disk |
+| **CPU** | Per-core usage bars with aggregate sparkline history |
+| **Memory** | RAM and commit charge with sparkline history |
+| **Disk** | Read/write bytes per second and utilization sparkline per physical disk |
 | **Network** | Rx/Tx per adapter, live |
-| **Processes** | Sortable - CPU%, memory, threads, status, owner |
+| **GPU** | Utilization % with sparkline history and VRAM used/total |
+| **NPU** | Utilization % with sparkline history (shown alongside GPU when detected) |
+| **Processes** | Sortable - CPU%, memory, threads, disk I/O, status, owner |
+
+All gauges use an 8-level heat gradient: **dark blue → cyan → green → yellow → orange → crimson** as load increases.
 
 <br>
 
-Hit <kbd>Enter</kbd> on any process to expand it and see its threads inline.
+Press <kbd>Enter</kbd> or **double-click** any process to expand it and see its threads inline.
 
+<!-- screenshot: threads_expanded — process with threads expanded showing wait states and module names -->
 ![Thread expansion](docs/screenshots/threads_expanded.png)
 
 Each thread shows what it's actually waiting on - `Sleep`, `Mutex`, `LpcReceive`, `Queue`, not just "Waiting". Start address resolves to a module name; anything that doesn't map to a loaded module gets flagged.
+
+<br>
 
 Press <kbd>i</kbd> on any process to open the **inspect overlay** - a deep-dive panel with six tabs:
 
@@ -57,14 +65,36 @@ Press <kbd>t</kbd> to toggle **tree view** - processes indent under their parent
 
 <br>
 
-<h2>Why</h2>
+<h2>GPU & NPU</h2>
 
-- Something is eating CPU and you need to know which *thread*
-- You want disk I/O without pulling up Sysinternals
-- You're in the terminal already - stay there
-- Kill something and confirm it's gone without switching windows
+The GPU panel shows each adapter's utilization and VRAM in a compact table with sparkline history. Toggle with <kbd>Shift+G</kbd>.
 
-Usernames come from the Windows token API directly - real names, not SID strings. Run as Administrator to see more. Some processes (antimalware, lsass) are PPL and will always show `?` - that's Windows, not a bug.
+When an NPU is detected the panel splits 50/50 - GPU on the left, NPU on the right. Detected devices include AMD XDNA, Intel NPU (Meteor Lake "AI Boost"), Qualcomm Hexagon, AMD Ryzen AI, and anything branded "npu" or "neural". AMD XDNA (invisible to DXGI) is found via a supplemental SetupAPI PCI-bus scan at startup.
+
+<!-- screenshot: gpu_npu — GPU/NPU split panel showing utilization sparklines and VRAM -->
+![GPU / NPU panel](docs/screenshots/gpu_npu.png)
+
+<br>
+
+<h2>Services</h2>
+
+Press <kbd>v</kbd> to open the **services overlay** - a full-screen table of all Windows services with status (color-coded), name, display name, start type, and PID.
+
+Type any letter to filter as you go. <kbd>Backspace</kbd> erases. <kbd>y</kbd> copies the selected service's display name to the clipboard. <kbd>Esc</kbd> closes.
+
+<!-- screenshot: services — services overlay with a filter typed, one row highlighted -->
+![Services panel](docs/screenshots/services.png)
+
+<br>
+
+<h2>Mouse</h2>
+
+| Action | |
+|--------|---|
+| Left-click panel | Focus that panel |
+| Left-click column header | Sort by that column; click again to reverse |
+| Double-click process row | Expand / collapse threads (same as <kbd>Enter</kbd>) |
+| Scroll wheel | Navigate the process list |
 
 <br>
 
@@ -77,6 +107,10 @@ cargo build --release
 </pre>
 
 One binary - `target\release\wtop.exe`. Copy it wherever.
+
+> **Tip:** Add that directory to your `PATH` so `wtop` is available from any terminal without a full path.
+
+Pre-built binaries are attached to each [GitHub Release](../../releases/latest) if you don't have Rust installed.
 
 <pre>
 wtop                                                  # defaults
@@ -114,9 +148,9 @@ Logs go to `%TEMP%\wtop.log`.
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Move up / down |
 | <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Jump 20 rows |
 | <kbd>Home</kbd> / <kbd>End</kbd> | Top / bottom |
-| <kbd>Tab</kbd> / <kbd>Shift</kbd><kbd>Tab</kbd> | Cycle panel focus |
+| <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> | Cycle panel focus (skips hidden panels) |
 | <kbd>Enter</kbd> | Expand / collapse threads inline |
-| <kbd>Ctrl</kbd><kbd>G</kbd> | Jump to PID |
+| <kbd>Ctrl+G</kbd> | Jump to PID |
 
 </details>
 
@@ -130,7 +164,7 @@ Logs go to `%TEMP%\wtop.log`.
 | <kbd>/</kbd> | Jump to process by partial name |
 | <kbd>p</kbd> | Toggle system processes |
 | <kbd>u</kbd> | Show only your processes |
-| <kbd>s</kbd> / <kbd>Shift</kbd><kbd>S</kbd> | Next / prev sort column |
+| <kbd>s</kbd> / <kbd>Shift+S</kbd> | Next / prev sort column |
 | <kbd>r</kbd> | Flip sort order |
 | <kbd>t</kbd> | Toggle tree view (parent/child hierarchy) |
 
@@ -143,9 +177,11 @@ Logs go to `%TEMP%\wtop.log`.
 | Key | |
 |-----|---|
 | <kbd>i</kbd> | Inspect selected process (6-tab detail overlay) |
-| <kbd>Shift</kbd><kbd>K</kbd> | Kill selected process (asks first) |
+| <kbd>Shift+K</kbd> | Kill selected process (asks first) |
+| <kbd>y</kbd> | Copy selected process name + PID to clipboard |
+| <kbd>v</kbd> | Open services overlay |
 | <kbd>+</kbd> / <kbd>-</kbd> | Faster / slower refresh |
-| <kbd>q</kbd> / <kbd>Ctrl</kbd><kbd>C</kbd> | Quit |
+| <kbd>q</kbd> / <kbd>Ctrl+C</kbd> | Quit |
 
 </details>
 
@@ -167,43 +203,73 @@ Open with <kbd>i</kbd>, close with <kbd>i</kbd> or <kbd>Esc</kbd>.
 </details>
 
 <details>
+<summary><strong>Services overlay</strong></summary>
+<br>
+
+Open with <kbd>v</kbd>, close with <kbd>v</kbd> or <kbd>Esc</kbd>.
+
+| Key | |
+|-----|---|
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Move cursor |
+| <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Jump 10 rows |
+| Any letter | Filter by name / display name |
+| <kbd>Backspace</kbd> | Erase filter |
+| <kbd>Delete</kbd> | Clear filter |
+| <kbd>y</kbd> | Copy selected display name to clipboard |
+
+</details>
+
+<details>
 <summary><strong>Display</strong></summary>
 <br>
 
 | Key | |
 |-----|---|
-| <kbd>Shift</kbd><kbd>L</kbd> | Cycle layout |
-| <kbd>Shift</kbd><kbd>T</kbd> | Cycle theme |
+| <kbd>Shift+L</kbd> | Cycle layout |
+| <kbd>Shift+T</kbd> | Cycle theme |
 | <kbd>d</kbd> | Toggle disk panel |
 | <kbd>n</kbd> | Toggle network panel |
+| <kbd>Shift+G</kbd> | Toggle GPU panel |
 | <kbd>c</kbd> | Toggle disk I/O columns |
 | <kbd>g</kbd> | Toggle Nerd Font glyphs |
+| <kbd>C</kbd> | Settings panel |
 | <kbd>w</kbd> | Windows Terminal panel |
-| <kbd>?</kbd> <kbd>h</kbd> | Help overlay |
+| <kbd>?</kbd> / <kbd>h</kbd> | Help overlay |
 
 </details>
 
 <br>
 
+<!-- screenshot: filter_kill — filter bar active + kill confirm dialog -->
 ![Filter and kill confirm](docs/screenshots/filter_kill.png)
+
+<br>
+
+<h2>Settings</h2>
+
+Press <kbd>C</kbd> to open the settings panel. All options that have a dedicated key also live here, plus column visibility toggles.
+
+<!-- screenshot: settings — settings panel open showing all sections -->
+![Settings panel](docs/screenshots/settings.png)
 
 <br>
 
 <h2>Themes</h2>
 
-`--theme <name>` at launch, or cycle at runtime with <kbd>Shift</kbd><kbd>T</kbd>.
+`--theme <name>` at launch, or cycle at runtime with <kbd>Shift+T</kbd>.
 
 `dark` · `light` · `catppuccin_mocha` · `cyberpunk` · `dracula` · `gruvbox` · `monokai` · `nord` · `one_dark` · `solarized_dark` · `tokyo_night`
 
 Themes are TOML files in `%APPDATA%\wtop\themes\`. Built-ins are exported there on first launch - copy and edit to make your own. Drop any `.toml` in the directory and it appears in the cycle immediately, live-reloaded as you edit. See [`themes/README.md`](themes/README.md) for the full schema.
 
+<!-- screenshot: themes — animated or side-by-side showing several themes -->
 ![Themes](docs/screenshots/themes.gif)
 
 <br>
 
 <h2>Layouts</h2>
 
-Cycle with <kbd>Shift</kbd><kbd>L</kbd>.
+Cycle with <kbd>Shift+L</kbd>.
 
 | | |
 |-|-|
@@ -212,6 +278,7 @@ Cycle with <kbd>Shift</kbd><kbd>L</kbd>.
 | **Compact** | Panels stacked left, process list right |
 | **Stacked** | Single column - process list gets the most room |
 
+<!-- screenshot: layouts — side-by-side showing wide vs compact vs stacked -->
 ![Layouts](docs/screenshots/layouts.png)
 
 <br>
@@ -220,6 +287,7 @@ Cycle with <kbd>Shift</kbd><kbd>L</kbd>.
 
 Press <kbd>w</kbd> to open the WT panel. If you haven't set a Nerd Font yet, wtop can write the setting - press <kbd>f</kbd>, confirm, restart WT.
 
+<!-- screenshot: wt_panel — Windows Terminal info panel -->
 ![Windows Terminal panel](docs/screenshots/wt_panel.png)
 
 <br>

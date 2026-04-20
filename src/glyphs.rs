@@ -18,6 +18,8 @@ pub struct Glyphs {
     pub net_icon: &'static str,
     /// Prefix for the GPU panel title.
     pub gpu_icon: &'static str,
+    /// Prefix for the NPU panel title.
+    pub npu_icon: &'static str,
     /// Prefix for the Processes panel title.
     pub proc_icon: &'static str,
 
@@ -49,6 +51,7 @@ impl Glyphs {
             disk_icon: "",
             net_icon: "",
             gpu_icon: "",
+            npu_icon: "",
             proc_icon: "",
             expand_open: "▼",
             expand_closed: "▶",
@@ -64,24 +67,27 @@ impl Glyphs {
     /// the terminal (e.g. CaskaydiaCove Nerd Font Mono).
     ///
     /// Codepoints used:
-    /// - `\u{f4bc}` nf-md-chip          → CPU
-    /// - `\u{f538}` nf-fa-microchip     → Memory
-    /// - `\u{f0a0}` nf-fa-hdd_o         → Disk
-    /// - `\u{f1eb}` nf-fa-wifi          → Network
-    /// - `\u{f085}` nf-fa-cogs          → Processes
-    /// - `\u{f078}` nf-fa-chevron_down  → expand open
-    /// - `\u{f054}` nf-fa-chevron_right → expand closed
-    /// - `\u{f071}` nf-fa-warning       → suspicious thread
-    /// - `\u{f00c}` nf-fa-check         → adapter up
-    /// - `\u{f00d}` nf-fa-times         → adapter down
+    /// - `\u{f4bc}` nf-md-chip                  → CPU
+    /// - `\u{efc5}` nf-fa-memory                → Memory
+    /// - `\u{f0a0}` nf-fa-hdd_o                 → Disk
+    /// - `\u{f1eb}` nf-fa-wifi                  → Network
+    /// - `\u{f0e51}` nf-md-monitor_screenshot   → GPU
+    /// - `\u{ee0d}` nf-fa-robot                 → NPU
+    /// - `\u{f085}` nf-fa-cogs                  → Processes
+    /// - `\u{f078}` nf-fa-chevron_down          → expand open
+    /// - `\u{f054}` nf-fa-chevron_right         → expand closed
+    /// - `\u{f071}` nf-fa-warning               → suspicious thread
+    /// - `\u{f00c}` nf-fa-check                 → adapter up
+    /// - `\u{f00d}` nf-fa-times                 → adapter down
     pub fn nerd() -> Self {
         Self {
-            cpu_icon:     "\u{f4bc} ",
-            mem_icon:     "\u{f538} ",
-            disk_icon:    "\u{f0a0} ",
-            net_icon:     "\u{f1eb} ",
-            gpu_icon:     "\u{f878} ",
-            proc_icon:    "\u{f085} ",
+            cpu_icon:     "\u{f4bc}  ",
+            mem_icon:     "\u{efc5}  ",
+            disk_icon:    "\u{f0a0}  ",
+            net_icon:     "\u{f1eb}  ",
+            gpu_icon:     "\u{f0e51}  ",
+            npu_icon:     "\u{ee0d}  ",
+            proc_icon:    "\u{f085}  ",
             expand_open:  "\u{f078}",
             expand_closed: "\u{f054}",
             expand_none:  " ",

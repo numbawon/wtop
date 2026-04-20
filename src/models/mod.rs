@@ -4,6 +4,7 @@ pub mod gpu;
 pub mod inspect;
 pub mod memory;
 pub mod network;
+pub mod npu;
 pub mod process;
 pub mod services;
 pub mod thread;

@@ -18,7 +18,7 @@ pub fn render(
     theme: &Theme,
 ) {
     let width  = area.width.min(100);
-    let height = area.height.min(40).max(10);
+    let height = area.height.clamp(10, 40);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup = Rect::new(x, y, width, height);

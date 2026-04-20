@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::slice;
 
 use windows::Win32::System::Services::{
@@ -10,17 +11,23 @@ use windows::core::PCWSTR;
 
 use crate::models::services::{ServiceEntry, ServiceStartType, ServiceStatus};
 
-pub struct ServicesCollector;
+pub struct ServicesCollector {
+    start_type_cache: HashMap<String, ServiceStartType>,
+}
 
 impl ServicesCollector {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self { start_type_cache: HashMap::new() }
+    }
 
-    pub fn collect(&self) -> Vec<ServiceEntry> {
-        unsafe { collect_inner() }.unwrap_or_default()
+    pub fn collect(&mut self) -> Vec<ServiceEntry> {
+        unsafe { collect_inner(&mut self.start_type_cache) }.unwrap_or_default()
     }
 }
 
-unsafe fn collect_inner() -> windows::core::Result<Vec<ServiceEntry>> {
+unsafe fn collect_inner(
+    cache: &mut HashMap<String, ServiceStartType>,
+) -> windows::core::Result<Vec<ServiceEntry>> {
     let scm = OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE)?;
 
     let mut bytes_needed: u32 = 0;
@@ -49,7 +56,7 @@ unsafe fn collect_inner() -> windows::core::Result<Vec<ServiceEntry>> {
     services_returned = 0;
     resume_handle = 0;
 
-    EnumServicesStatusExW(
+    if let Err(e) = EnumServicesStatusExW(
         scm,
         SC_ENUM_PROCESS_INFO,
         SERVICE_WIN32,
@@ -59,7 +66,10 @@ unsafe fn collect_inner() -> windows::core::Result<Vec<ServiceEntry>> {
         &mut services_returned,
         Some(&mut resume_handle),
         PCWSTR::null(),
-    )?;
+    ) {
+        let _ = CloseServiceHandle(scm);
+        return Err(e);
+    }
 
     let entries: &[ENUM_SERVICE_STATUS_PROCESSW] = slice::from_raw_parts(
         buffer.as_ptr() as *const ENUM_SERVICE_STATUS_PROCESSW,
@@ -84,7 +94,13 @@ unsafe fn collect_inner() -> windows::core::Result<Vec<ServiceEntry>> {
             _ => ServiceStatus::Unknown,
         };
 
-        let start_type = query_start_type(scm, entry.lpServiceName);
+        let start_type = if let Some(&cached) = cache.get(&name) {
+            cached
+        } else {
+            let st = query_start_type(scm, entry.lpServiceName);
+            cache.insert(name.clone(), st);
+            st
+        };
 
         result.push(ServiceEntry { name, display_name, status, start_type, pid });
     }
