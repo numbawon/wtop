@@ -1,6 +1,6 @@
 [package]
 name = "wtop"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 description = "A Windows terminal system monitor - htop for Windows"
 license = "MIT"

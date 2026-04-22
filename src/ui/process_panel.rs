@@ -68,12 +68,16 @@ pub fn render(
         (0..shown).collect()
     };
 
+    // rows_index counts every pushed row (process + thread sub-rows) so that
+    // is_selected correctly matches process_cursor regardless of expanded threads.
+    let mut rows_index: usize = 0;
+
     for (display_row, &vi) in display_indices.iter().enumerate() {
         let proc = match visible.get(vi) {
             Some(p) => *p,
             None => continue,
         };
-        let is_selected = display_row == state.process_cursor;
+        let is_selected = rows_index == state.process_cursor;
         let row_style = if is_selected {
             theme.row_selected
         } else if state.cpu_spike_flash.contains_key(&proc.pid) {
@@ -105,6 +109,7 @@ pub fn render(
             .collect();
 
         rows.push(Row::new(cells).style(row_style));
+        rows_index += 1;
 
         // Expanded thread sub-rows.
         if proc.expanded {
@@ -173,6 +178,7 @@ pub fn render(
                     .collect();
 
                 rows.push(Row::new(thread_cells).style(thread_style));
+                rows_index += 1;
             }
         }
     }

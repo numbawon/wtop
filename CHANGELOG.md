@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2] - 2026-04-21
+
+### Fixed
+
+- **Phantom second selection in expanded process rows** - when scrolling the cursor into thread sub-rows of an expanded process, a second row highlight appeared on an unrelated process below. Root cause: `is_selected` used `display_row` (process-only counter) instead of the true rendered row index, which includes thread sub-rows.
+
+---
+
 ## [0.4.1] - 2026-04-18
 
 ### Added
